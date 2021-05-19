@@ -1,0 +1,6235 @@
+---
+title: "Code File Thesis: Predicting a Child's Genuine Smile"
+author: "Brigitte van Oostveen"
+date: "19-5-2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# load styler for styling the R code. Create citations for the thesis report.
+# Remaining packages are loaded while coding.
+library(styler)
+library(report)
+citation("report")
+citation("styler")
+```
+
+## Thesis code file
+
+This document can serve as a guideline for performing a social science or marketing study involving video analysis. The features retrieved from the video's can be used to train and predict classification models. 
+
+This document holds the following structure:
+
+Part 1: Preparing the data
+- Load the processed video CSV file into R
+- Combining different CSV files into a master data frame
+- Pre-process the data frame obtained by the loaded and combined data
+- Data cleaning steps
+- Feature creation
+- Creating descriptive statistics 
+
+Part 2: EDA
+- Descriptive statistics tables
+- Distribution analysis
+
+Part 3: Train and predict
+- Train and test set
+- Training models (decision trees and SVM)
+- Prediction
+- Evaluation
+
+Part 4: Remain code used in this project
+
+A complete reference list of can be found in the thesis file. References of the packages used to create the code, can be found in the code blocks. They are not printed in the HTML or pdf output. Some ideas have been obtained using help forums like stackoverflow (https://stackoverflow.com/). Usually in the posts you can also find help debugging your code. 
+
+### Disclaimer
+The thesis and this RMarkdown code file do not contain any studies with human participants or animals performed by the author. Data used in this study were previously collected. The original owner of the data retains ownership of the data during and after the completion of this thesis.
+
+## Part 1: processing video's into one dataset in R.
+
+Before loading the data a new Project directory is created. All data used for this project is stored in this directory. 
+
+### Load the data
+
+The database is processed through OpenFace2.0 and consists of $475$ csv files. These are loaded into R using the dplyr package. The original filename is added to the database using the flnm function. The function appends the filename to each record during the initial reading of the csv files. Next, this function reading multiple csv files add once is used, instead of the `read_csv()` function.
+
+Attributions and Appreciations:
+With special thanks to: https://stackoverflow.com/users/5088194/leerssej for providing the code for both functions to append the filenames and load multiple csv files add once in one dataframe. 
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# load packages
+library(tidyverse)
+library(data.table)
+
+# *dplyr()*
+# `read_csv()`
+
+# functions to load the data
+read_plus <- function(flnm) {
+  read_csv(flnm) %>%
+    mutate(filename = flnm)
+}
+
+map_df_read_csv <- function(path, pattern = "*.csv") {
+  list.files(path, pattern, full.names = TRUE) %>%
+    map_df(~ read_plus(.))
+}
+
+# create a data frame and relocate the ID column as the first column
+df <- map_df_read_csv("Data_Openface/CSV", "*.csv")
+df %>% relocate(filename, .before = face_id)
+
+# save the data frame
+write.csv(x = df, file = "masterfile", row.names = FALSE)
+
+# citation("tidyverse")
+# citation("data.table")
+```
+
+Last step, the dataframe is saved as "masterfile" in the project directory. 
+
+### Combining information about the dataset in one dataframe
+
+Check the filename column using tables of a copy of the original dataframe. First, the dataframe is loaded the dataframe the project drive, and a copy of the file is created. Next, file names are changed into readable files to connect to the gender and age information from separate text files. Open the file of details. Adjust the filename column to be the same as the dataframe. Use `inner_join()` from the dplyr package to connect the two dataframes. Check the number of observations and variables. Last save the new dataframe as a csv raw database to work with in the next steps of the process, EDA and datacleaning.
+
+From now on the masterfile_connected will be the raw database saved as it contains the full set of elements. The database contains of $95,830$ observations and $719$ variables. 
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# reload the data and create a copy as working file
+library(tidyverse)
+df <- read.csv("masterfile")
+df_copy <- df
+df_copy %>% relocate(filename, .before = face_id)
+# check the data frame ID
+table(df_copy$filename)
+
+# clean filename information to a readable format
+df_copy$filename <- gsub(".csv", "", df_copy$filename)
+df_copy$filename <- gsub("Data_Openface/CSV/", "", df_copy$filename)
+df_copy$filename
+table(df_copy$filename)
+
+# open file information from the text file
+UvA_subjects <- read.csv("UvA-NEMO_Smile_Database_File_Details.txt",
+  header = FALSE, skip = 4, sep = "\t"
+)
+
+# create column names
+colnames(UvA_subjects) <-
+  c("filename", "subject", "gender", "age", "smile_type")
+
+# clean filename format
+UvA_subjects$filename <- gsub(".mp4", "", UvA_subjects$filename)
+
+# join the two datasets by filename
+UvA_df <- inner_join(UvA_subjects, df_copy, "filename")
+
+# save the data frame
+write.csv(x = UvA_df, file = "masterfile_connected", row.names = FALSE)
+```
+
+### Data cleaning
+
+For datacleaning, the masterfile_connected is used and will serve as base for further pre-processing. Next step is checking the data for NA's. The colSums table shows there are no NA values in the database. A visualized NA report is showing no values meaning no NA's and a full combination field for the dataframe.
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# load packages
+library(tidyverse)
+library(dplyr)
+library("VIM")
+
+# load masterfile and create a copy
+UvA_original <- read.csv("masterfile_connected")
+
+# check for NA's on different levels using tables and summary data
+table(UvA_original$subject, useNA = "always")
+table(UvA_original$subject, UvA_original$age)
+colSums(is.na(UvA_original))
+aggr(UvA_original)
+table(UvA_original$age, UvA_original$smile_type)
+table(UvA_original$gender, UvA_original$smile_type)
+table(UvA_original$smile_type, UvA_original$subject)
+summary(UvA_original[, 1:10])
+summary(UvA_original[, 11:20])
+
+# AU selection check
+summary(UvA_original[, 700:719])
+
+citation("dplyr")
+citation("VIM")
+```
+
+Next the confidence and success rate from the original file are checked. All $95.830$ video frames are processed successfully by OpenFace and the `mean()` confidence rate is $98%$.
+
+```{r}
+# Check the confidence and success rate of the loaded video's.
+table(UvA_original$confidence)
+table(UvA_original$success)
+mean(UvA_original$confidence)
+```
+
+### Feature selection and creation. 
+
+After loading and checking the data the next step is to create and select the features for the models. There are three different types of features to work with in this research question: parts or symmetry of the face, facial expression and temporal features. In the code below, the dataset is converted to a final dataset including all the features either selected or created. This final dataset is used in the next part of the report to build the models and perform the analysis.In the thesis report an elaboration will be given on the description, selection and calculation of the features.
+
+```{r message=FALSE, warning=FALSE}
+# load packages
+library(readr)
+library(scales)
+
+# create a copy from the original dataset to create the final dataset
+UvA_final <- UvA_original
+
+# select and create the features for the database using a pipeline
+UvA_final <- UvA_final %>%
+  select(
+    filename, subject, gender, age, smile_type, frame, timestamp,
+    starts_with("gaze_angle"), starts_with("pose_"), starts_with("AU"),
+    x_36, x_37, x_38, x_39, x_42, x_43, x_44, x_45, x_48, x_54, y_36, y_37,
+    y_38, y_39, y_42, y_43, y_44, y_45, y_48, y_54
+  ) %>%
+  mutate(AU06_12_c = ifelse(AU06_c == 1 & AU12_c == 1, 1, 0)) %>%
+  mutate(lip = sqrt((x_48 - x_54)^2 + (y_48 - y_54)^2)) %>%
+  mutate(eye_x_m_l = (x_36 + x_39) / 2) %>%
+  mutate(eye_y_m_l = (y_36 + y_39) / 2) %>%
+  mutate(eye_x_m_r = (x_42 + x_45) / 2) %>%
+  mutate(eye_y_m_r = (y_42 + y_45) / 2) %>%
+  mutate(eye_x_u_l = (x_37 + x_38) / 2) %>%
+  mutate(eye_y_u_l = (y_37 + y_38) / 2) %>%
+  mutate(eye_x_u_r = (x_43 + x_44) / 2) %>%
+  mutate(eye_y_u_r = (y_43 + y_44) / 2) %>%
+  mutate(
+    eye_l = sqrt((eye_x_m_l - eye_x_u_l)^2 + (eye_y_m_l - eye_y_u_l)^2)
+  ) %>%
+  mutate(
+    eye_r = sqrt((eye_x_m_r - eye_x_u_r)^2 + (eye_y_m_r - eye_y_u_r)^2)
+  ) %>%
+  mutate(eye = (eye_l + eye_r) / 2) %>%
+  mutate(lip_m_x = (x_48 + x_54) / 2) %>%
+  mutate(lip_m_y = (y_48 + y_54) / 2) %>%
+  mutate(amplitude = rescale(sqrt((x_54 - lip_m_x)^2 + (y_54 - lip_m_y)^2))) %>%
+  mutate(duration = 0.02) %>%
+  mutate(stage = duration / amplitude) %>%
+  group_by(filename) %>%
+  mutate(apex = ifelse(amplitude > mean(amplitude), amplitude, NA)) %>%
+  mutate(onset_offset = ifelse(amplitude <= mean(amplitude), amplitude, NA)) %>%
+  mutate(onset = ifelse(onset_offset & frame < mean(frame), amplitude, NA)) %>%
+  mutate(offset = ifelse(onset_offset & frame >= mean(frame),
+    amplitude, NA
+  )) %>%
+  select(
+    filename, subject, gender, age, smile_type, frame, timestamp,
+    starts_with("gaze"), starts_with("pose_R"),
+    starts_with("AU") & ends_with("_r"),
+    lip, eye, amplitude, stage, apex, offset, onset
+  ) %>%
+  ungroup()
+
+# save the final file.
+write_csv(UvA_final, "UvA_final")
+
+# Mathematical Notes:
+
+# distance between landmark points 36 and 39 left and 42 and 45 right eyes
+# eye middle point of x and y = x_eye_middle (x36 + x39)/2 etc y
+# eye upper middle point of x and y = x_eye_upper_middle (x37 + x38)/2
+# same for the right eye
+
+# euclidean distance for eye: srqt(x2-x1)^2+(y2-y1)^2
+# see calculation lip but than for eye_middle point vs eye_upper_point
+
+# eye gaze only take the angle
+
+# duration ratio = timestamp/duration
+# amplitude = lip middle towards left lip corner
+
+# check if sum stats are the same as with OpenFacer - done same result
+# all(UvA_face_check$pose_Tz_sd, UvA_sum$pose_Tz_sd)
+
+# citation("readr")
+# citation("scales")
+```
+
+### Temporal features apex, onset & offset 
+
+For apex, onset and offset, four options for defining the stages have been reviewed. All options show about the same signal as the lip amplitude feature created to measure onset, apex and offset. The options are, the longest subsequence and, start, middle and end point of AU06 and starting point of AU12, based on the categorical variables, and the mean `abline()` of amplitude. AU12 proves to be always there and starts at different levels for every subject, so this feature could not be used as the categorical variable always displays one. The same goes for the amplitude itself, but because the data show a relative long apex face, the mean is close to the apex value. Therefore a split of stages based on the mean `abline()` would be a solid solution. The longest subsequence variable could be used as it concerns a single smile but does not show a stable enough sequence to be used (see picture). The AU06 categorical variable starts from zero with every subject, but about 80 participants do not show a offset based on this metric. Therefore the choice is to proceed with the mean `abline()` split point of the three stages, onset, apex and offset.The plot shows all 4 as an illustration. 
+
+Attributions and Appreciations:
+With special thanks to: Jinjing Xie https://www.r-bloggers.com/2014/09/compute-longest-increasingdecreasing-subsequence-using-rcpp/ for providing the code for the function. 
+
+```{r message=FALSE, warning=FALSE}
+# load packages
+library(compiler)
+
+# function for creating longest sub sequence
+longest_subseq.R <- cmpfun(function(x) {
+  P <- integer(length(x))
+  M <- integer(length(x) + 1)
+  L <- newL <- 0
+  for (i in seq_along(x) - 1) {
+    lo <- 1
+    hi <- L
+    while (lo <= hi) {
+      mid <- (lo + hi) %/% 2
+      if (x[M[mid + 1] + 1] < x[i + 1]) {
+        lo <- mid + 1
+      } else {
+        hi <- mid - 1
+      }
+    }
+    newL <- lo
+    P[i + 1] <- M[newL]
+    if (newL > L) {
+      M[newL + 1] <- i
+      L <- newL
+    } else if (x[i + 1] < x[M[newL + 1] + 1]) {
+      M[newL + 1] <- i
+    }
+  }
+  k <- M[L + 1]
+  re <- integer(L)
+  for (i in L:1) {
+    re[i] <- k + 1
+    k <- P[k + 1]
+  }
+  re
+})
+
+# check the result of one participant number 20.
+longest_subseq.R(UvA_final$amplitude[1:193])
+
+# create graphs to check the four options.
+par(mfrow = c(2, 2))
+par(mai = c(.8, .8, .2, .2))
+
+# option 1: mean calculation
+plot(UvA_final$frame[1:193], UvA_final$amplitude[1:193],
+  main = "Sequences amplitude",
+  ylab = "amplitude", xlab = "frame", pch = 16, col = "#0000004D",
+  cex.main = 0.7
+)
+abline(mean(UvA_final$amplitude[1:193]), 0, col = "blue", pch = 16)
+abline(v = 15, lty = 2)
+abline(v = 175, lty = 2)
+text(5, 0.7, "onset")
+text(100, 0.7, "apex")
+text(187, 0.7, "offset")
+
+# option 2: AU12
+plot(UvA_final$frame[1:193], UvA_final$AU12_r[1:193],
+  main = "Sequences AU12_r",
+  ylab = "amplitude", xlab = "frame", pch = 16, col = "#0000004D",
+  cex.main = 0.7
+)
+
+# option 3: AU06
+plot(UvA_final$frame[1:193], UvA_final$AU06_r[1:193],
+  main = "Sequences AU06_r",
+  ylab = "amplitude", xlab = "frame", pch = 16, col = "#0000004D",
+  cex.main = 0.7
+)
+
+# option 4: LIS (increasing and decreasing)
+plot(UvA_final$amplitude[1:193],
+  main = "Longest Increasing (blue) and Decreasing (red) Subsequences",
+  ylab = "amplitude", xlab = "frame", pch = 16, col = "#0000004D",
+  cex.main = 0.7
+)
+ind <- longest_subseq.R(UvA_final$amplitude[1:193])
+ind
+points(ind, UvA_final$amplitude[1:193][ind], pch = 16, col = "blue")
+rind <- longest_subseq.R(-UvA_final$amplitude[1:193])
+rind
+points(rind, UvA_final$amplitude[1:193][rind], pch = 16, col = "red")
+
+# citation("compiler")
+```
+
+### Creating descriptive satistics 
+
+With the final dataset, summary statistics are created using 2 files. The first file will contain the summary statistics, minimum value `min()`, maximum value `max()`, the average value `mean()` and standard deviation `sd()`. The `min()` and `max()` values will be analyzed from the tables and for the `mean()` and `sd()` histograms are made to show the distribution as well as the difference in distribution between the two smile types. 
+This section will be used a set to report these values in the thesis if applicable, e.g., the average time of the video recording or the number of frames.
+The second file of summary statistics will be used as the input file for models and will contain the mean values only, as described in part 2. 
+
+```{r message=FALSE, warning=FALSE}
+# load packages
+library(scales)
+library(tidyverse)
+library(dplyr)
+
+# create a file to create the summary static files from the the final dataset.
+# Using a copy of the final dataset.
+UvA_basis <- read.csv("UvA_final")
+dim(UvA_basis)
+
+# file 1 containing all summary statistics for all features.
+UvA_sum <- UvA_basis %>%
+  group_by(filename, subject, gender, age, smile_type) %>%
+  summarise_all(list(min = min, max = max, mean = mean, sd = sd), na.rm = TRUE)
+# save the file
+write_csv(UvA_sum, "UvA_sum")
+
+
+# file 2 create set of features with value mean.
+UvA_modelset <- UvA_basis %>%
+  select(
+    filename, subject, gender, age, smile_type, gaze_angle_x, gaze_angle_y,
+    pose_Rx, pose_Ry, pose_Rz, starts_with("AU") & ends_with("_r"),
+    lip, eye, amplitude, stage, apex, offset, onset
+  ) %>%
+  group_by(filename, subject, gender, age, smile_type) %>%
+  summarise_all(list(mean = mean), na.rm = TRUE) %>%
+  ungroup()
+# save the file
+write_csv(UvA_modelset, "UvA_modelset")
+```
+
+
+## EDA
+
+### Decriptive statistics tables
+
+An overall table of the descriptive statistics is created by the `summery()` function. For a split based on the classification the psych package is used with the `describeBy()` function which groups the classifier smile_type and smile_type + gender. Both these files will be analyzed used the output table.
+
+```{r message=FALSE, warning=FALSE}
+# load packages
+library(psych)
+
+# the overall summary of the descriptive statistics
+desc_stats <- summary(UvA_sum)
+desc_stats
+
+# descriptive statistics per classifier
+desc_stats_class <- describeBy(UvA_sum, UvA_sum$smile_type)
+desc_stats_class
+
+# descriptive statistics per classifier and boys/girls
+desc_stats_class_gender <- describeBy(UvA_sum ~ smile_type + gender)
+desc_stats_class_gender
+
+# citation("psych")
+```
+
+### Distribution analysis
+
+The main conclusions of the descriptive statistics will be given in the thesis report. 
+The ggplot package is used to create distribution visualization of the distribution of the features. 
+
+```{r message=FALSE, warning=FALSE}
+# loading packages
+library(ggplot2)
+library(ggpubr)
+
+# age & gender distribution of the video's
+ggplot(UvA_sum, aes(y = age, x = smile_type, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Age") +
+  scale_x_discrete(name = "Smile Type")
+
+fig1 <- ggplot(UvA_sum, aes(y = age, x = smile_type, color = gender)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Age") +
+  scale_x_discrete(name = "Smile Type")
+
+ggplot(data = UvA_sum, aes(x = age, fill = smile_type)) +
+  geom_bar(stat = "count") +
+  scale_x_continuous(
+    name = "Age",
+    breaks = c(8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+  ) +
+  scale_y_continuous(name = "Smile Type") +
+  labs() +
+  theme(
+    legend.position = "bottom", text = element_text(size = 10),
+    axis.text = element_text(size = 10)
+  )
+
+ggplot(data = UvA_sum, aes(x = age, fill = gender)) +
+  geom_bar(stat = "count") +
+  scale_x_continuous(
+    name = "Age",
+    breaks = c(8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+  ) +
+  scale_y_continuous(name = "Gender") +
+  labs() +
+  theme(
+    legend.position = "bottom", text = element_text(size = 10),
+    axis.text = element_text(size = 10)
+  )
+
+fig2 <- ggplot(data = UvA_sum, aes(x = age, fill = smile_type)) +
+  geom_bar(stat = "count") +
+  scale_x_continuous(
+    name = "Age",
+    breaks = c(8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+  ) +
+  scale_y_continuous(name = "Smile Type") +
+  facet_grid(smile_type ~ gender) +
+  labs() +
+  theme(
+    legend.position = "bottom", text = element_text(size = 10),
+    axis.text = element_text(size = 10)
+  )
+
+# use the ggpubr package to combine multiple ggplot visualizations in one plot
+figure <- ggarrange(fig1, fig2,
+  # labels = c("1", "2"),
+  ncol = 2, nrow = 1
+)
+figure
+
+# citation("ggpubr")
+```
+
+Check the distributions and any possible outliers, using the `mean()`  and `sd()`.
+
+```{r message=FALSE, warning=FALSE}
+# distribution per feature
+
+# age
+ggplot(UvA_sum, aes(x = age)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = age, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+
+# frame time
+ggplot(UvA_sum, aes(x = frame_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = frame_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4) +
+  scale_x_continuous(name = "Frame Mean") +
+  scale_y_continuous(name = "Smile Type Count") +
+  theme(
+    legend.position = "bottom", text = element_text(size = 10),
+    axis.text = element_text(size = 10)
+  )
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# gaze_angle_x
+ggplot(UvA_sum, aes(x = gaze_angle_x_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = gaze_angle_x_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(
+  UvA_sum,
+  aes(x = smile_type, y = gaze_angle_x_mean, color = smile_type)
+) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Gaze x") +
+  scale_x_discrete(name = "Smile Type")
+
+# gaze_angle_y
+ggplot(UvA_sum, aes(x = gaze_angle_y_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = gaze_angle_y_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(
+  UvA_sum,
+  aes(x = smile_type, y = gaze_angle_y_mean, color = smile_type)
+) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Gaze y") +
+  scale_x_discrete(name = "Smile Type")
+
+
+# pose_Rx
+ggplot(UvA_sum, aes(x = pose_Rx_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = pose_Rx_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = smile_type, y = pose_Rx_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Pose Rx") +
+  scale_x_discrete(name = "Smile Type")
+
+# pose_Ry
+ggplot(UvA_sum, aes(x = pose_Ry_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = pose_Ry_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = smile_type, y = pose_Ry_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Pose Ry") +
+  scale_x_discrete(name = "Smile Type")
+
+# pose_Rz
+ggplot(UvA_sum, aes(x = pose_Rz_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = pose_Rz_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = smile_type, y = pose_Rz_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Pose Rz") +
+  scale_x_discrete(name = "Smile Type")
+
+
+# AU01
+ggplot(UvA_sum, aes(x = AU01_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU01_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU01_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU01_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU01_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU01") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU02
+ggplot(UvA_sum, aes(x = AU02_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU02_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU02_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU02_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU02_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU02") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU04
+ggplot(UvA_sum, aes(x = AU04_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU04_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+# AU04 does not seem to have an impact, as most values show zero value
+
+# AU05
+ggplot(UvA_sum, aes(x = AU05_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU05_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU05_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU05_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU05_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU05") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU06
+ggplot(UvA_sum, aes(x = AU06_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU06_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU06_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU06_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU06_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU06") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU07
+ggplot(UvA_sum, aes(x = AU07_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU07_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU07_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU07_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU07_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU07") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU09
+ggplot(UvA_sum, aes(x = AU09_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU09_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU09_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU09_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU02_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU01") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU10
+ggplot(UvA_sum, aes(x = AU10_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU10_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU10_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU10_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU10_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU10") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU12
+ggplot(UvA_sum, aes(x = AU12_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+fig5 <- ggplot(UvA_sum, aes(x = AU12_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU12_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+fig4 <- ggplot(UvA_sum, aes(x = AU12_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+fig3 <- ggplot(
+  UvA_sum,
+  aes(x = smile_type, y = AU12_r_mean, color = smile_type)
+) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU12") +
+  scale_x_discrete(name = "Smile Type")
+
+figure1 <- ggarrange(fig3, fig4, fig5,
+  # labels = c("1", "2"),
+  ncol = 2, nrow = 2
+)
+figure1
+
+# AU14
+ggplot(UvA_sum, aes(x = AU14_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU14_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU14_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU14_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU14_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU14") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU15
+ggplot(UvA_sum, aes(x = AU15_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU15_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU15_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU15_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU15_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU15") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU17
+ggplot(UvA_sum, aes(x = AU17_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU17_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU17_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU17_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU17_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU17") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU20
+ggplot(UvA_sum, aes(x = AU20_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU20_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU20_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU20_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU20_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU20") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU23
+ggplot(UvA_sum, aes(x = AU23_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU23_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU23_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU23_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU23_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU23") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU25
+ggplot(UvA_sum, aes(x = AU25_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+fig8 <- ggplot(UvA_sum, aes(x = AU25_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU25_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+fig7 <- ggplot(UvA_sum, aes(x = AU25_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+fig6 <- ggplot(
+  UvA_sum,
+  aes(x = smile_type, y = AU25_r_mean, color = smile_type)
+) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU25") +
+  scale_x_discrete(name = "Smile Type")
+
+figure2 <- ggarrange(fig6, fig7, fig8,
+  # labels = c("1", "2"),
+  ncol = 2, nrow = 2
+)
+figure2
+
+# AU26
+ggplot(UvA_sum, aes(x = AU26_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU26_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU26_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU26_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU26_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU26") +
+  scale_x_discrete(name = "Smile Type")
+
+# AU45
+ggplot(UvA_sum, aes(x = AU45_r_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU45_r_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = AU45_r_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = AU45_r_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = AU45_r_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU45") +
+  scale_x_discrete(name = "Smile Type")
+
+
+# lip
+ggplot(UvA_sum, aes(x = lip_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = lip_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = lip_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = lip_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = lip_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "Lip") +
+  scale_x_discrete(name = "Smile Type")
+
+
+
+# eye
+ggplot(UvA_sum, aes(x = eye_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = eye_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = eye_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = eye_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = eye_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "eye") +
+  scale_x_discrete(name = "Smile Type")
+
+
+# amplitude for onset, apex and offset
+ggplot(UvA_sum, aes(x = amplitude_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = amplitude_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = amplitude_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = amplitude_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = amplitude_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "amlitude") +
+  scale_x_discrete(name = "Smile Type")
+
+# apex
+ggplot(UvA_sum, aes(x = apex_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = apex_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = apex_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = apex_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = apex_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU01") +
+  scale_x_discrete(name = "Smile Type")
+
+# onset
+ggplot(UvA_sum, aes(x = onset_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = onset_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = onset_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = onset_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = onset_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "AU01") +
+  scale_x_discrete(name = "Smile Type")
+
+# offset
+ggplot(UvA_sum, aes(x = offset_sd)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = offset_sd, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = offset_mean)) +
+  geom_histogram(fill = "white", colour = "black") +
+  facet_grid(smile_type ~ ., scales = "free")
+
+ggplot(UvA_sum, aes(x = offset_mean, fill = smile_type)) +
+  geom_histogram(position = "identity", alpha = 0.4)
+
+ggplot(UvA_sum, aes(x = smile_type, y = offset_mean, color = smile_type)) +
+  geom_boxplot() +
+  scale_y_continuous(name = "offset") +
+  scale_x_discrete(name = "Smile Type")
+```
+
+Some other check plot types to be maybe used later on
+
+```{r}
+# apex vs AU's 6 and 12 for happiness
+ggplot(data = UvA_sum, aes(x = AU12_r_mean, y = AU06_r_mean)) +
+  geom_point() +
+  geom_smooth() +
+  scale_x_continuous(
+    name = "AU12 ",
+  ) +
+  scale_y_continuous(name = "AU06") +
+  labs() +
+  theme(
+    legend.position = "bottom", text = element_text(size = 10),
+    axis.text = element_text(size = 10)
+  )
+
+
+# correlation between eye and lip
+ggplot(data = UvA_sum, aes(y = eye_mean, x = lip_mean)) +
+  geom_point() +
+  geom_smooth()
+
+# correlation between onset and apex
+ggplot(data = UvA_sum, aes(y = onset_mean, x = apex_mean)) +
+  geom_point() +
+  geom_smooth()
+```
+
+
+## Part 3: Train, predict and evaluation
+
+The caret package is used to perform the training, testing and evaluation as well the splitting the data. Further explanation of the options and parameter settings of the caret package can be found in the thesis, via the citation link, or `?` R help function. 
+
+### Create data partioning: Train and test set
+
+```{r message=FALSE, warning=FALSE}
+# set.seed for modeling to 1973 for all models and predictions
+set.seed(1973)
+
+# loading packages
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(tree)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+
+# remove the filename (or ID) from the modelset to avoid overfilling
+UvA_modelset$filename <- NULL
+UvA_modelset$smile_type <- as.factor(UvA_modelset$smile_type)
+UvA_modelset$gender <- as.factor(UvA_modelset$gender)
+
+# relevel to spontaneous smile
+UvA_modelset$smile_type <- relevel(UvA_modelset$smile_type, ref = "spontaneous")
+
+# Split into training and test
+set.seed(1973)
+trn_index <- createDataPartition(UvA_modelset$smile_type, p = 0.7, list = FALSE)
+trn_smile <- UvA_modelset[trn_index, ]
+tst_smile <- UvA_modelset[-trn_index, ]
+
+# Split the test set into boys and girls for detecting differences
+set.seed(1973)
+tst_smile_girls <- tst_smile %>%
+  filter(gender == "female")
+tst_smile_boys <- tst_smile %>%
+  filter(gender == "male  ")
+
+# check the balance in the dataset for the independent variable
+table(UvA_modelset$smile_type)
+
+# citation("caret")
+# citation("tree")
+# citation("rpart")
+# citation("rpart.plot")
+# citation("ggplot2")
+# citation("rattle")
+```
+
+### Tain, predict en evaluate models
+
+#### Decision trees 
+
+For the decision trees two packages are explored. For convenience of the project the choice has been made to work with the rpart package over the tree package. More information about these two packages can be found in the citation link or `?` R help function. The trained models are divided into eight categories. Multiple models per category are explored. The explanation on the categories can be found in the thesis. To train the models the `train()` function is used. The models are stored as variable. The parameter settings are explained in the thesis. The models use 10 fold cross-validation. To check the density a visualization is added to the complete model. On this first complete model, also the pre-processing parameter is tested. This is done to see if scaling and centering the the dependent features improves the model. This is not the case for the complete decision tree including all features. The parameter is kept at default for that reason. To visualize the trained decision trees the rattle package is used. The package provides a nicer looking tree. The `predict()` function is used to create the predictions based on the test set, and stored as variable. For model evaluation the `confusionMatrix()` function is used and printed. 
+
+```{r message=FALSE, warning=FALSE}
+# check the balance for the baseline model
+baseline_model <- table(trn_smile$smile_type)
+baseline_model
+
+# model 0: complete model
+
+# set the seed
+set.seed(1973)
+
+# train the model using train and rpart, store the model
+smile__tree_model_0 <- train(smile_type ~ .,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# check the outcome of the model
+smile__tree_model_0$results
+
+# check and visualize the variable importance
+varImp_0 <- varImp(smile__tree_model_0)
+varImp_0
+par(mfrow = c(1, 1))
+par(mai = c(.8, .8, .2, .2))
+plot(varImp_0,
+  decreasing = TRUE,
+  main = "Variable importance in complex model",
+  ylab = "variable importance"
+)
+
+# summarize the model details - not printed
+# summary(smile__tree_model_0$finalModel)
+
+# visualize the tree using the rattle package
+fancyRpartPlot(smile__tree_model_0$finalModel)
+
+# density plot of accuracy measurements, check with the resample data
+trellis.par.set(caretTheme())
+densityplot(smile__tree_model_0, pch = "|")
+smile__tree_model_0$resample
+
+# model 0: complete model with centering and scaling - outcome does not change
+set.seed(1973)
+smile__tree_model_0.0.1 <- train(smile_type ~ .,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10),
+  preProcess = c("center", "scale")
+)
+smile__tree_model_0.0.1$results
+varImp_0.0.1 <- varImp(smile__tree_model_0.0.1)
+varImp_0.0.1
+par(mfrow = c(1, 1))
+par(mai = c(.8, .8, .2, .2))
+plot(varImp_0,
+  decreasing = TRUE,
+  main = "Variable importance in complex model",
+  ylab = "variable importance"
+)
+
+# summary(smile__tree_model_0$finalModel)
+# visualize the tree using the rattle package
+fancyRpartPlot(smile__tree_model_0.0.1$finalModel)
+
+# predict based on the test set and the model, store the model
+set.seed(1973)
+smile__tree_model_0_pred <- predict(smile__tree_model_0, tst_smile)
+
+# summary of the prediction
+summary(smile__tree_model_0_pred)
+
+# create a confusion matrix to evaluate the model
+smile__tree_model_0_confM <- confusionMatrix(
+  smile__tree_model_0_pred,
+  tst_smile$smile_type
+)
+
+# print the confusion matrix
+smile__tree_model_0_confM
+
+# same way working for predicting boys and girls
+set.seed(1973)
+smile__tree_model_0.1_pred <- predict(smile__tree_model_0, tst_smile_boys)
+summary(smile__tree_model_0.1_pred)
+smile__tree_model_0.1_confM <- confusionMatrix(
+  smile__tree_model_0.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_0.1_confM
+
+set.seed(1973)
+smile__tree_model_0.2_pred <- predict(smile__tree_model_0, tst_smile_girls)
+summary(smile__tree_model_0.2_pred)
+smile__tree_model_0.2_confM <- confusionMatrix(
+  smile__tree_model_0.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_0.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 1 onset-apex-offset
+set.seed(1973)
+smile__tree_model_1 <- train(smile_type ~ onset_mean + offset_mean + apex_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__tree_model_1$results
+varImp(smile__tree_model_1)
+# summary(smile__tree_model_1$finalModel)
+
+fancyRpartPlot(smile__tree_model_1$finalModel)
+
+smile__tree_model_1_pred <- predict(smile__tree_model_1, tst_smile)
+summary(smile__tree_model_1_pred)
+smile__tree_model_1_confM <- confusionMatrix(
+  smile__tree_model_1_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_1_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_1.1_pred <- predict(smile__tree_model_1, tst_smile_boys)
+summary(smile__tree_model_1.1_pred)
+smile__tree_model_1.1_confM <- confusionMatrix(
+  smile__tree_model_1.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_1.1_confM
+
+set.seed(1973)
+smile__tree_model_1.2_pred <- predict(smile__tree_model_1, tst_smile_girls)
+summary(smile__tree_model_1.2_pred)
+smile__tree_model_1.2_confM <- confusionMatrix(
+  smile__tree_model_1.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_1.2_confM
+
+
+# model 1A onset
+set.seed(1973)
+smile__tree_model_1A <- train(smile_type ~ onset_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__tree_model_1A$results
+# summary(smile__tree_model_1A$finalModel)
+
+smile__tree_model_1A_pred <- predict(smile__tree_model_1A, tst_smile)
+summary(smile__tree_model_1A_pred)
+smile__tree_model_1A_confM <- confusionMatrix(
+  smile__tree_model_1A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_1A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_1A.1_pred <- predict(smile__tree_model_1A, tst_smile_boys)
+summary(smile__tree_model_1A.1_pred)
+smile__tree_model_1A.1_confM <- confusionMatrix(
+  smile__tree_model_1A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_1A.1_confM
+
+set.seed(1973)
+smile__tree_model_1A.2_pred <- predict(smile__tree_model_1A, tst_smile_girls)
+summary(smile__tree_model_1A.2_pred)
+smile__tree_model_1A.2_confM <- confusionMatrix(
+  smile__tree_model_1A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_1A.2_confM
+
+
+# model 1B apex
+set.seed(1973)
+smile__tree_model_1B <- train(smile_type ~ apex_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__tree_model_1B$results
+# summary(smile__tree_model_1B$finalModel)
+
+smile__tree_model_1B_pred <- predict(smile__tree_model_1B, tst_smile)
+summary(smile__tree_model_1B_pred)
+smile__tree_model_1B_confM <- confusionMatrix(
+  smile__tree_model_1B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_1B_confM
+
+set.seed(1973)
+smile__tree_model_1B.1_pred <- predict(smile__tree_model_1B, tst_smile_boys)
+summary(smile__tree_model_1B.1_pred)
+smile__tree_model_1B.1_confM <- confusionMatrix(
+  smile__tree_model_1B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_1B.1_confM
+
+set.seed(1973)
+smile__tree_model_1B.2_pred <- predict(smile__tree_model_1B, tst_smile_girls)
+summary(smile__tree_model_1B.2_pred)
+smile__tree_model_1B.2_confM <- confusionMatrix(
+  smile__tree_model_1B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_1B.2_confM
+
+
+# model 1C offset
+set.seed(1973)
+smile__tree_model_1C <- train(smile_type ~ offset_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__tree_model_1C$results
+# summary(smile__tree_model_1C$finalModel)
+
+smile__tree_model_1C_pred <- predict(smile__tree_model_1C, tst_smile)
+summary(smile__tree_model_1C_pred)
+smile__tree_model_1C_confM <- confusionMatrix(
+  smile__tree_model_1C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_1C_confM
+
+set.seed(1973)
+smile__tree_model_1C.1_pred <- predict(smile__tree_model_1C, tst_smile_boys)
+summary(smile__tree_model_1C.1_pred)
+smile__tree_model_1C.1_confM <- confusionMatrix(
+  smile__tree_model_1C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_1C.1_confM
+
+set.seed(1973)
+smile__tree_model_1C.2_pred <- predict(smile__tree_model_1C, tst_smile_girls)
+summary(smile__tree_model_1C.2_pred)
+smile__tree_model_1C.2_confM <- confusionMatrix(
+  smile__tree_model_1C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_1C.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 2 complete excluding subject and age info
+set.seed(1973)
+smile__tree_model_2 <- train(smile_type ~ . - subject - age,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_2$results
+varImp(smile__tree_model_2)
+# summary(smile__tree_model_2$finalModel)
+fancyRpartPlot(smile__tree_model_2$finalModel)
+
+smile__tree_model_2_pred <- predict(smile__tree_model_2, tst_smile)
+summary(smile__tree_model_2_pred)
+smile__tree_model_2_confM <- confusionMatrix(
+  smile__tree_model_2_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_2_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_2.1_pred <- predict(smile__tree_model_2, tst_smile_boys)
+summary(smile__tree_model_2.1_pred)
+smile__tree_model_2.1_confM <- confusionMatrix(
+  smile__tree_model_2.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_2.1_confM
+
+set.seed(1973)
+smile__tree_model_2.2_pred <- predict(smile__tree_model_2, tst_smile_girls)
+summary(smile__tree_model_2.2_pred)
+smile__tree_model_2.2_confM <- confusionMatrix(
+  smile__tree_model_2.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_2.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 3 complete lip and eye features
+set.seed(1973)
+smile__tree_model_3 <- train(smile_type ~ lip_mean + eye_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_3$results
+varImp(smile__tree_model_3)
+# summary(smile__tree_model_3$finalModel)
+fancyRpartPlot(smile__tree_model_3$finalModel)
+
+smile__tree_model_3_pred <- predict(smile__tree_model_3, tst_smile)
+summary(smile__tree_model_3_pred)
+smile__tree_model_3_confM <- confusionMatrix(
+  smile__tree_model_3_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_3_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_3.1_pred <- predict(smile__tree_model_3, tst_smile_boys)
+summary(smile__tree_model_3.1_pred)
+smile__tree_model_3.1_confM <- confusionMatrix(
+  smile__tree_model_3.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_3.1_confM
+
+set.seed(1973)
+smile__tree_model_3.2_pred <- predict(smile__tree_model_3, tst_smile_girls)
+summary(smile__tree_model_3.2_pred)
+smile__tree_model_3.2_confM <- confusionMatrix(
+  smile__tree_model_3.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_3.2_confM
+
+
+
+# model 3A lip
+set.seed(1973)
+smile__tree_model_3A <- train(smile_type ~ lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_3A$results
+# summary(smile__tree_model_3A$finalModel)
+
+smile__tree_model_3A_pred <- predict(smile__tree_model_3A, tst_smile)
+summary(smile__tree_model_3A_pred)
+smile__tree_model_3A_confM <- confusionMatrix(
+  smile__tree_model_3A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_3A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_3A.1_pred <- predict(smile__tree_model_3A, tst_smile_boys)
+summary(smile__tree_model_3A.1_pred)
+smile__tree_model_3A.1_confM <- confusionMatrix(
+  smile__tree_model_3A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_3A.1_confM
+
+set.seed(1973)
+smile__tree_model_3A.2_pred <- predict(smile__tree_model_3A, tst_smile_girls)
+summary(smile__tree_model_3A.2_pred)
+smile__tree_model_3A.2_confM <- confusionMatrix(
+  smile__tree_model_3A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_3A.2_confM
+
+
+# model 3B eye
+set.seed(1973)
+smile__tree_model_3B <- train(smile_type ~ eye_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_3B$results
+# summary(smile__tree_model_3B$finalModel)
+
+smile__tree_model_3B_pred <- predict(smile__tree_model_3B, tst_smile)
+summary(smile__tree_model_3B_pred)
+smile__tree_model_3B_confM <- confusionMatrix(
+  smile__tree_model_3B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_3B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_3B.1_pred <- predict(smile__tree_model_3B, tst_smile_boys)
+summary(smile__tree_model_3B.1_pred)
+smile__tree_model_3B.1_confM <- confusionMatrix(
+  smile__tree_model_3B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_3B.1_confM
+
+
+set.seed(1973)
+smile__tree_model_3B.2_pred <- predict(smile__tree_model_3B, tst_smile_girls)
+summary(smile__tree_model_3B.2_pred)
+smile__tree_model_3B.2_confM <- confusionMatrix(
+  smile__tree_model_3B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_3B.2_confM
+
+
+# model 3C complete lip, amplitude, and eye features
+set.seed(1973)
+smile__tree_model_3C <- train(smile_type ~ lip_mean + eye_mean + amplitude_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_3C$results
+varImp(smile__tree_model_3C)
+# summary(smile__tree_model_3C$finalModel)
+fancyRpartPlot(smile__tree_model_3C$finalModel)
+
+smile__tree_model_3C_pred <- predict(smile__tree_model_3C, tst_smile)
+summary(smile__tree_model_3C_pred)
+smile__tree_model_3C_confM <- confusionMatrix(
+  smile__tree_model_3C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_3C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_3C.1_pred <- predict(smile__tree_model_3C, tst_smile_boys)
+summary(smile__tree_model_3C.1_pred)
+smile__tree_model_3C.1_confM <- confusionMatrix(
+  smile__tree_model_3C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_3C.1_confM
+
+set.seed(1973)
+smile__tree_model_3C.2_pred <- predict(smile__tree_model_3C, tst_smile_girls)
+summary(smile__tree_model_3C.2_pred)
+smile__tree_model_3C.2_confM <- confusionMatrix(
+  smile__tree_model_3C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_3C.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 4 AU features complete model
+set.seed(1973)
+smile__tree_model_4 <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4$results
+smile__tree_model_4$coefnames
+varImp(smile__tree_model_4)
+# summary(smile__tree_model_4$finalModel)
+fancyRpartPlot(smile__tree_model_4$finalModel)
+
+smile__tree_model_4_pred <- predict(smile__tree_model_4, tst_smile)
+summary(smile__tree_model_4_pred)
+smile__tree_model_4_confM <- confusionMatrix(
+  smile__tree_model_4_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4.1_pred <- predict(smile__tree_model_4, tst_smile_boys)
+summary(smile__tree_model_4.1_pred)
+smile__tree_model_4.1_confM <- confusionMatrix(
+  smile__tree_model_4.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4.1_confM
+
+set.seed(1973)
+smile__tree_model_4.2_pred <- predict(smile__tree_model_4, tst_smile_girls)
+summary(smile__tree_model_4.2_pred)
+smile__tree_model_4.2_confM <- confusionMatrix(
+  smile__tree_model_4.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4.2_confM
+
+
+# model 4A AU features happiness model
+set.seed(1973)
+smile__tree_model_4A <- train(smile_type ~ AU06_r_mean + AU12_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(
+    method = "cv",
+    number = 10
+  )
+)
+
+# density plot of accuracy measurements
+trellis.par.set(caretTheme())
+densityplot(smile__tree_model_4A, pch = "|")
+smile__tree_model_4A$resample
+smile__tree_model_4A$results
+smile__tree_model_4A$coefnames
+varImp(smile__tree_model_4A)
+# summary(smile__tree_model_4A$finalModel)
+fancyRpartPlot(smile__tree_model_4A$finalModel,
+  caption = "Model 4A: AU06 + AU12"
+)
+
+smile__tree_model_4A_pred <- predict(smile__tree_model_4A, tst_smile)
+summary(smile__tree_model_4A_pred)
+smile__tree_model_4A_confM <- confusionMatrix(
+  smile__tree_model_4A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4A.1_pred <- predict(smile__tree_model_4A, tst_smile_boys)
+summary(smile__tree_model_4A.1_pred)
+smile__tree_model_4A.1_confM <- confusionMatrix(
+  smile__tree_model_4A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4A.1_confM
+
+set.seed(1973)
+smile__tree_model_4A.2_pred <- predict(smile__tree_model_4A, tst_smile_girls)
+summary(smile__tree_model_4A.2_pred)
+smile__tree_model_4A.2_confM <- confusionMatrix(
+  smile__tree_model_4A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4A.2_confM
+
+
+# model 4B AU best model
+set.seed(1973)
+smile__tree_model_4B <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean,
+method = "rpart",
+data = trn_smile,
+trControl = trainControl(
+  method = "cv",
+  number = 10
+)
+)
+
+smile__tree_model_4B$results
+smile__tree_model_4B$coefnames
+varImp(smile__tree_model_4B)
+# summary(smile__tree_model_4$finalModel)
+fancyRpartPlot(smile__tree_model_4B$finalModel)
+
+smile__tree_model_4B_pred <- predict(smile__tree_model_4B, tst_smile)
+summary(smile__tree_model_4B_pred)
+smile__tree_model_4B_confM <- confusionMatrix(
+  smile__tree_model_4B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4B.1_pred <- predict(smile__tree_model_4B, tst_smile_boys)
+summary(smile__tree_model_4B.1_pred)
+smile__tree_model_4B.1_confM <- confusionMatrix(
+  smile__tree_model_4B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4B.1_confM
+
+set.seed(1973)
+smile__tree_model_4B.2_pred <- predict(smile__tree_model_4B, tst_smile_girls)
+summary(smile__tree_model_4B.2_pred)
+smile__tree_model_4B.2_confM <- confusionMatrix(
+  smile__tree_model_4B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4B.2_confM
+
+
+# model 4C AU happiness + blink
+set.seed(1973)
+smile__tree_model_4C <- train(smile_type ~ AU45_r_mean + AU06_r_mean +
+  AU12_r_mean,
+method = "rpart",
+data = trn_smile,
+trControl = trainControl(
+  method = "cv",
+  number = 10
+)
+)
+
+smile__tree_model_4C$results
+smile__tree_model_4C$coefnames
+varImp(smile__tree_model_4C)
+# summary(smile__tree_model_4C$finalModel)
+fancyRpartPlot(smile__tree_model_4C$finalModel)
+
+smile__tree_model_4C_pred <- predict(smile__tree_model_4C, tst_smile)
+summary(smile__tree_model_4C_pred)
+smile__tree_model_4C_confM <- confusionMatrix(
+  smile__tree_model_4C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4C.1_pred <- predict(smile__tree_model_4C, tst_smile_boys)
+summary(smile__tree_model_4C.1_pred)
+smile__tree_model_4C.1_confM <- confusionMatrix(
+  smile__tree_model_4C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4C.1_confM
+
+set.seed(1973)
+smile__tree_model_4C.2_pred <- predict(smile__tree_model_4C, tst_smile_girls)
+summary(smile__tree_model_4C.2_pred)
+smile__tree_model_4C.2_confM <- confusionMatrix(
+  smile__tree_model_4C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4C.2_confM
+
+
+# model 4D AU45
+set.seed(1973)
+smile__tree_model_4D <- train(smile_type ~ AU45_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4D$results
+smile__tree_model_4D$coefnames
+# summary(smile__tree_model_4D$finalModel)
+
+smile__tree_model_4D_pred <- predict(smile__tree_model_4D, tst_smile)
+summary(smile__tree_model_4D_pred)
+smile__tree_model_4D_confM <- confusionMatrix(
+  smile__tree_model_4D_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4D.1_pred <- predict(smile__tree_model_4D, tst_smile_boys)
+summary(smile__tree_model_4D.1_pred)
+smile__tree_model_4D.1_confM <- confusionMatrix(
+  smile__tree_model_4D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4D.1_confM
+
+set.seed(1973)
+smile__tree_model_4D.2_pred <- predict(smile__tree_model_4D, tst_smile_girls)
+summary(smile__tree_model_4D.2_pred)
+smile__tree_model_4D.2_confM <- confusionMatrix(
+  smile__tree_model_4D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4D.2_confM
+
+
+# model 4E AU12
+set.seed(1973)
+smile__tree_model_4E <- train(smile_type ~ AU12_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4E$results
+smile__tree_model_4E$coefnames
+# summary(smile__tree_model_4E$finalModel)
+
+smile__tree_model_4E_pred <- predict(smile__tree_model_4E, tst_smile)
+summary(smile__tree_model_4E_pred)
+smile__tree_model_4E_confM <- confusionMatrix(
+  smile__tree_model_4E_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4E.1_pred <- predict(smile__tree_model_4E, tst_smile_boys)
+summary(smile__tree_model_4E.1_pred)
+smile__tree_model_4E.1_confM <- confusionMatrix(
+  smile__tree_model_4E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4E.1_confM
+
+set.seed(1973)
+smile__tree_model_4E.2_pred <- predict(smile__tree_model_4E, tst_smile_girls)
+summary(smile__tree_model_4E.2_pred)
+smile__tree_model_4E.2_confM <- confusionMatrix(
+  smile__tree_model_4E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4E.2_confM
+
+
+# model 4F AU06
+set.seed(1973)
+smile__tree_model_4F <- train(smile_type ~ AU06_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4F$results
+smile__tree_model_4F$coefnames
+# summary(smile__tree_model_4F$finalModel)
+
+smile__tree_model_4F_pred <- predict(smile__tree_model_4F, tst_smile)
+summary(smile__tree_model_4F_pred)
+smile__tree_model_4F_confM <- confusionMatrix(
+  smile__tree_model_4F_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4F.1_pred <- predict(smile__tree_model_4F, tst_smile_boys)
+summary(smile__tree_model_4F.1_pred)
+smile__tree_model_4F.1_confM <- confusionMatrix(
+  smile__tree_model_4F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4F.1_confM
+
+set.seed(1973)
+smile__tree_model_4F.2_pred <- predict(smile__tree_model_4F, tst_smile_girls)
+summary(smile__tree_model_4F.2_pred)
+smile__tree_model_4F.2_confM <- confusionMatrix(
+  smile__tree_model_4F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4F.2_confM
+
+
+# model 4G AU10
+set.seed(1973)
+smile__tree_model_4G <- train(smile_type ~ AU10_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4G$results
+smile__tree_model_4G$coefnames
+# summary(smile__tree_model_4G$finalModel)
+
+smile__tree_model_4G_pred <- predict(smile__tree_model_4G, tst_smile)
+summary(smile__tree_model_4G_pred)
+smile__tree_model_4G_confM <- confusionMatrix(
+  smile__tree_model_4G_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4G.1_pred <- predict(smile__tree_model_4G, tst_smile_boys)
+summary(smile__tree_model_4G.1_pred)
+smile__tree_model_4G.1_confM <- confusionMatrix(
+  smile__tree_model_4G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4G.1_confM
+
+set.seed(1973)
+smile__tree_model_4G.2_pred <- predict(smile__tree_model_4G, tst_smile_girls)
+summary(smile__tree_model_4G.2_pred)
+smile__tree_model_4G.2_confM <- confusionMatrix(
+  smile__tree_model_4G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4G.2_confM
+
+
+# model 4H AU01
+set.seed(1973)
+smile__tree_model_4H <- train(smile_type ~ AU01_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4H$results
+smile__tree_model_4H$coefnames
+# summary(smile__tree_model_4H$finalModel)
+
+smile__tree_model_4H_pred <- predict(smile__tree_model_4H, tst_smile)
+summary(smile__tree_model_4H_pred)
+smile__tree_model_4H_confM <- confusionMatrix(
+  smile__tree_model_4H_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4H.1_pred <- predict(smile__tree_model_4H, tst_smile_boys)
+summary(smile__tree_model_4H.1_pred)
+smile__tree_model_4H.1_confM <- confusionMatrix(
+  smile__tree_model_4H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4H.1_confM
+
+set.seed(1973)
+smile__tree_model_4H.2_pred <- predict(smile__tree_model_4H, tst_smile_girls)
+summary(smile__tree_model_4H.2_pred)
+smile__tree_model_4H.2_confM <- confusionMatrix(
+  smile__tree_model_4H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4H.2_confM
+
+
+# model 4I AU25
+set.seed(1973)
+smile__tree_model_4I <- train(smile_type ~ AU25_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4I$results
+smile__tree_model_4I$coefnames
+# summary(smile__tree_model_4I$finalModel)
+
+smile__tree_model_4I_pred <- predict(smile__tree_model_4I, tst_smile)
+summary(smile__tree_model_4I_pred)
+smile__tree_model_4I_confM <- confusionMatrix(
+  smile__tree_model_4I_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4I.1_pred <- predict(smile__tree_model_4I, tst_smile_boys)
+summary(smile__tree_model_4I.1_pred)
+smile__tree_model_4I.1_confM <- confusionMatrix(
+  smile__tree_model_4I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4I.1_confM
+
+set.seed(1973)
+smile__tree_model_4I.2_pred <- predict(smile__tree_model_4I, tst_smile_girls)
+summary(smile__tree_model_4I.2_pred)
+smile__tree_model_4I.2_confM <- confusionMatrix(
+  smile__tree_model_4I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4I.2_confM
+
+
+# model 4J AU09
+set.seed(1973)
+smile__tree_model_4J <- train(smile_type ~ AU09_r_mean,
+  method = "rpart",
+  data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_4J$results
+smile__tree_model_4J$coefnames
+# summary(smile__tree_model_4J$finalModel)
+
+smile__tree_model_4J_pred <- predict(smile__tree_model_4J, tst_smile)
+summary(smile__tree_model_4J_pred)
+smile__tree_model_4J_confM <- confusionMatrix(
+  smile__tree_model_4J_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_4J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_4J.1_pred <- predict(smile__tree_model_4J, tst_smile_boys)
+summary(smile__tree_model_4J.1_pred)
+smile__tree_model_4J.1_confM <- confusionMatrix(
+  smile__tree_model_4J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_4J.1_confM
+
+set.seed(1973)
+smile__tree_model_4J.2_pred <- predict(smile__tree_model_4J, tst_smile_girls)
+summary(smile__tree_model_4J.2_pred)
+smile__tree_model_4J.2_confM <- confusionMatrix(
+  smile__tree_model_4J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_4J.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 5 head pose features
+set.seed(1973)
+smile__tree_model_5 <-
+  train(smile_type ~ pose_Rx_mean + pose_Ry_mean + pose_Rz_mean,
+    method = "rpart", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_5$results
+smile__tree_model_5$coefnames
+varImp(smile__tree_model_5)
+# summary(smile__tree_model_5$finalModel)
+
+smile__tree_model_5_pred <- predict(smile__tree_model_5, tst_smile)
+summary(smile__tree_model_5_pred)
+smile__tree_model_5_confM <- confusionMatrix(
+  smile__tree_model_5_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_5_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_5.1_pred <- predict(smile__tree_model_5, tst_smile_boys)
+summary(smile__tree_model_5.1_pred)
+smile__tree_model_5.1_confM <- confusionMatrix(
+  smile__tree_model_5.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_5.1_confM
+
+set.seed(1973)
+smile__tree_model_5.2_pred <- predict(smile__tree_model_5, tst_smile_girls)
+summary(smile__tree_model_5.2_pred)
+smile__tree_model_5.2_confM <- confusionMatrix(
+  smile__tree_model_5.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_5.2_confM
+
+
+# model 5A gaze features
+set.seed(1973)
+smile__tree_model_5A <-
+  train(smile_type ~ gaze_angle_x_mean + gaze_angle_y_mean,
+    method = "rpart", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_5A$results
+smile__tree_model_5A$coefnames
+varImp(smile__tree_model_5A)
+# summary(smile__tree_model_5A$finalModel)
+
+smile__tree_model_5A_pred <- predict(smile__tree_model_5A, tst_smile)
+summary(smile__tree_model_5A_pred)
+smile__tree_model_5A_confM <- confusionMatrix(
+  smile__tree_model_5A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_5A_confM
+
+set.seed(1973)
+smile__tree_model_5A.1_pred <- predict(smile__tree_model_5A, tst_smile_boys)
+summary(smile__tree_model_5A.1_pred)
+smile__tree_model_5A.1_confM <- confusionMatrix(
+  smile__tree_model_5A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_5A.1_confM
+
+set.seed(1973)
+smile__tree_model_5A.2_pred <- predict(smile__tree_model_5A, tst_smile_girls)
+summary(smile__tree_model_5A.2_pred)
+smile__tree_model_5A.2_confM <- confusionMatrix(
+  smile__tree_model_5A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_5A.2_confM
+
+
+# model 5B headpose + gaze features
+set.seed(1973)
+smile__tree_model_5B <-
+  train(smile_type ~ pose_Rx_mean + pose_Ry_mean + pose_Rz_mean +
+    gaze_angle_x_mean + gaze_angle_y_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_5B$results
+smile__tree_model_5B$coefnames
+varImp(smile__tree_model_5B)
+# summary(smile__tree_model_5B$finalModel)
+
+smile__tree_model_5B_pred <- predict(smile__tree_model_5B, tst_smile)
+summary(smile__tree_model_5B_pred)
+smile__tree_model_5B_confM <- confusionMatrix(
+  smile__tree_model_5B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_5B_confM
+
+set.seed(1973)
+smile__tree_model_5B.1_pred <- predict(smile__tree_model_5B, tst_smile_boys)
+summary(smile__tree_model_5B.1_pred)
+smile__tree_model_5B.1_confM <- confusionMatrix(
+  smile__tree_model_5B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_5B.1_confM
+
+set.seed(1973)
+smile__tree_model_5B.2_pred <- predict(smile__tree_model_5B, tst_smile_girls)
+summary(smile__tree_model_5B.2_pred)
+smile__tree_model_5B.2_confM <- confusionMatrix(
+  smile__tree_model_5B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_5B.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 6 dynamics and movement
+set.seed(1973)
+smile__tree_model_6 <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + eye_mean + lip_mean,
+    method = "rpart", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_6$results
+smile__tree_model_6$coefnames
+varImp(smile__tree_model_6)
+# summary(smile__tree_model_6$finalModel)
+fancyRpartPlot(smile__tree_model_6$finalModel)
+
+smile__tree_model_6_pred <- predict(smile__tree_model_6, tst_smile)
+summary(smile__tree_model_6_pred)
+smile__tree_model_6_confM <- confusionMatrix(
+  smile__tree_model_6_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6.1_pred <- predict(smile__tree_model_6, tst_smile_boys)
+summary(smile__tree_model_6.1_pred)
+smile__tree_model_6.1_confM <- confusionMatrix(
+  smile__tree_model_6.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6.1_confM
+
+set.seed(1973)
+smile__tree_model_6.2_pred <- predict(smile__tree_model_6, tst_smile_girls)
+summary(smile__tree_model_6.2_pred)
+smile__tree_model_6.2_confM <- confusionMatrix(
+  smile__tree_model_6.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6.2_confM
+
+
+
+# model 6A dynamics and eye movement
+set.seed(1973)
+smile__tree_model_6A <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + eye_mean,
+    method = "rpart", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_6A$results
+smile__tree_model_6A$coefnames
+varImp(smile__tree_model_6A)
+# summary(smile__tree_model_6A$finalModel)
+fancyRpartPlot(smile__tree_model_6A$finalModel)
+
+smile__tree_model_6A_pred <- predict(smile__tree_model_6A, tst_smile)
+summary(smile__tree_model_6A_pred)
+smile__tree_model_6A_confM <- confusionMatrix(
+  smile__tree_model_6A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6A.1_pred <- predict(smile__tree_model_6A, tst_smile_boys)
+summary(smile__tree_model_6A.1_pred)
+smile__tree_model_6A.1_confM <- confusionMatrix(
+  smile__tree_model_6A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6A.1_confM
+
+set.seed(1973)
+smile__tree_model_6A.2_pred <- predict(smile__tree_model_6A, tst_smile_girls)
+summary(smile__tree_model_6A.2_pred)
+smile__tree_model_6A.2_confM <- confusionMatrix(
+  smile__tree_model_6A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6A.2_confM
+
+
+# model 6B dynamics and lip movement
+set.seed(1973)
+smile__tree_model_6B <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + lip_mean,
+    method = "rpart", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__tree_model_6B$results
+smile__tree_model_6B$coefnames
+varImp(smile__tree_model_6B)
+# summary(smile__tree_model_6B$finalModel)
+fancyRpartPlot(smile__tree_model_6B$finalModel)
+
+smile__tree_model_6B_pred <- predict(smile__tree_model_6B, tst_smile)
+summary(smile__tree_model_6B_pred)
+smile__tree_model_6B_confM <- confusionMatrix(
+  smile__tree_model_6B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6B.1_pred <- predict(smile__tree_model_6B, tst_smile_boys)
+# summary(smile__tree_model_6B.1_pred)
+smile__tree_model_6B.1_confM <- confusionMatrix(
+  smile__tree_model_6B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6B.1_confM
+
+set.seed(1973)
+smile__tree_model_6B.2_pred <- predict(smile__tree_model_6B, tst_smile_girls)
+summary(smile__tree_model_6B.2_pred)
+smile__tree_model_6B.2_confM <- confusionMatrix(
+  smile__tree_model_6B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6B.2_confM
+
+
+
+# model 6C onset and movement
+set.seed(1973)
+smile__tree_model_6C <- train(smile_type ~ onset_mean + eye_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6C$results
+smile__tree_model_6C$coefnames
+varImp(smile__tree_model_6C)
+# summary(smile__tree_model_6C$finalModel)
+fancyRpartPlot(smile__tree_model_6C$finalModel)
+
+smile__tree_model_6C_pred <- predict(smile__tree_model_6C, tst_smile)
+summary(smile__tree_model_6C_pred)
+smile__tree_model_6C_confM <- confusionMatrix(
+  smile__tree_model_6C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6C.1_pred <- predict(smile__tree_model_6C, tst_smile_boys)
+summary(smile__tree_model_6C.1_pred)
+smile__tree_model_6C.1_confM <- confusionMatrix(
+  smile__tree_model_6C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6C.1_confM
+
+set.seed(1973)
+smile__tree_model_6C.2_pred <- predict(smile__tree_model_6C, tst_smile_girls)
+summary(smile__tree_model_6C.2_pred)
+smile__tree_model_6C.2_confM <- confusionMatrix(
+  smile__tree_model_6C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6C.2_confM
+
+
+# model 6D onset + eye
+set.seed(1973)
+smile__tree_model_6D <- train(smile_type ~ onset_mean + eye_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6D$results
+smile__tree_model_6D$coefnames
+varImp(smile__tree_model_6D)
+# summary(smile__tree_model_6D$finalModel)
+fancyRpartPlot(smile__tree_model_6D$finalModel)
+
+smile__tree_model_6D_pred <- predict(smile__tree_model_6D, tst_smile)
+summary(smile__tree_model_6D_pred)
+smile__tree_model_6D_confM <- confusionMatrix(
+  smile__tree_model_6D_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6D.1_pred <- predict(smile__tree_model_6D, tst_smile_boys)
+summary(smile__tree_model_6D.1_pred)
+smile__tree_model_6D.1_confM <- confusionMatrix(
+  smile__tree_model_6D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6D.1_confM
+
+set.seed(1973)
+smile__tree_model_6D.2_pred <- predict(smile__tree_model_6D, tst_smile_girls)
+summary(smile__tree_model_6D.2_pred)
+smile__tree_model_6D.2_confM <- confusionMatrix(
+  smile__tree_model_6D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6D.2_confM
+
+
+# model 6E onset + lip
+set.seed(1973)
+smile__tree_model_6E <- train(smile_type ~ onset_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6E$results
+smile__tree_model_6E$coefnames
+varImp(smile__tree_model_6E)
+# summary(smile__tree_model_6E$finalModel)
+fancyRpartPlot(smile__tree_model_6E$finalModel)
+
+smile__tree_model_6E_pred <- predict(smile__tree_model_6E, tst_smile)
+summary(smile__tree_model_6E_pred)
+smile__tree_model_6E_confM <- confusionMatrix(
+  smile__tree_model_6E_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6E.1_pred <- predict(smile__tree_model_6E, tst_smile_boys)
+summary(smile__tree_model_6E.1_pred)
+smile__tree_model_6E.1_confM <- confusionMatrix(
+  smile__tree_model_6E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6E.1_confM
+
+set.seed(1973)
+smile__tree_model_6E.2_pred <- predict(smile__tree_model_6E, tst_smile_girls)
+summary(smile__tree_model_6E.2_pred)
+smile__tree_model_6E.2_confM <- confusionMatrix(
+  smile__tree_model_6E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6E.2_confM
+
+
+# model 6F apex and movement
+set.seed(1973)
+smile__tree_model_6F <- train(smile_type ~ apex_mean + eye_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6F$results
+smile__tree_model_6F$coefnames
+varImp(smile__tree_model_6F)
+# summary(smile__tree_model_6F$finalModel)
+fancyRpartPlot(smile__tree_model_6F$finalModel,
+  caption = "model 6F: Decision Tree - apex, eye, lip"
+)
+
+smile__tree_model_6F_pred <- predict(smile__tree_model_6F, tst_smile)
+summary(smile__tree_model_6F_pred)
+smile__tree_model_6F_confM <- confusionMatrix(
+  smile__tree_model_6F_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6F.1_pred <- predict(smile__tree_model_6F, tst_smile_boys)
+summary(smile__tree_model_6F.1_pred)
+smile__tree_model_6F.1_confM <- confusionMatrix(
+  smile__tree_model_6F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6F.1_confM
+
+set.seed(1973)
+smile__tree_model_6F.2_pred <- predict(smile__tree_model_6F, tst_smile_girls)
+summary(smile__tree_model_6F.2_pred)
+smile__tree_model_6F.2_confM <- confusionMatrix(
+  smile__tree_model_6F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6F.2_confM
+
+
+# model 6G apex + eye
+set.seed(1973)
+smile__tree_model_6G <- train(smile_type ~ apex_mean + eye_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6G$results
+smile__tree_model_6G$coefnames
+varImp(smile__tree_model_6G)
+# summary(smile__tree_model_6G$finalModel)
+fancyRpartPlot(smile__tree_model_6G$finalModel)
+
+smile__tree_model_6G_pred <- predict(smile__tree_model_6G, tst_smile)
+summary(smile__tree_model_6G_pred)
+smile__tree_model_6G_confM <- confusionMatrix(
+  smile__tree_model_6G_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6G.1_pred <- predict(smile__tree_model_6G, tst_smile_boys)
+summary(smile__tree_model_6G.1_pred)
+smile__tree_model_6G.1_confM <- confusionMatrix(
+  smile__tree_model_6G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6G.1_confM
+
+set.seed(1973)
+smile__tree_model_6G.2_pred <- predict(smile__tree_model_6G, tst_smile_girls)
+summary(smile__tree_model_6G.2_pred)
+smile__tree_model_6G.2_confM <- confusionMatrix(
+  smile__tree_model_6G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6G.2_confM
+
+
+# model 6H apex + lip
+set.seed(1973)
+smile__tree_model_6H <- train(smile_type ~ apex_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6H$results
+smile__tree_model_6H$coefnames
+varImp(smile__tree_model_6H)
+# summary(smile__tree_model_6H$finalModel)
+
+smile__tree_model_6H_pred <- predict(smile__tree_model_6H, tst_smile)
+summary(smile__tree_model_6H_pred)
+smile__tree_model_6H_confM <- confusionMatrix(
+  smile__tree_model_6H_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6H.1_pred <- predict(smile__tree_model_6H, tst_smile_boys)
+summary(smile__tree_model_6H.1_pred)
+smile__tree_model_6H.1_confM <- confusionMatrix(
+  smile__tree_model_6H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6H.1_confM
+
+set.seed(1973)
+smile__tree_model_6H.2_pred <- predict(smile__tree_model_6H, tst_smile_girls)
+summary(smile__tree_model_6H.2_pred)
+smile__tree_model_6H.2_confM <- confusionMatrix(
+  smile__tree_model_6H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6H.2_confM
+
+
+# model 6I offset and movement
+set.seed(1973)
+smile__tree_model_6I <- train(smile_type ~ offset_mean + eye_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6I$results
+smile__tree_model_6I$coefnames
+varImp(smile__tree_model_6I)
+# summary(smile__tree_model_6I$finalModel)
+fancyRpartPlot(smile__tree_model_6I$finalModel)
+
+smile__tree_model_6I_pred <- predict(smile__tree_model_6I, tst_smile)
+summary(smile__tree_model_6I_pred)
+smile__tree_model_6I_confM <- confusionMatrix(
+  smile__tree_model_6I_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6I.1_pred <- predict(smile__tree_model_6I, tst_smile_boys)
+summary(smile__tree_model_6I.1_pred)
+smile__tree_model_6I.1_confM <- confusionMatrix(
+  smile__tree_model_6I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6I.1_confM
+
+set.seed(1973)
+smile__tree_model_6I.2_pred <- predict(smile__tree_model_6I, tst_smile_girls)
+summary(smile__tree_model_6I.2_pred)
+smile__tree_model_6I.2_confM <- confusionMatrix(
+  smile__tree_model_6I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6I.2_confM
+
+
+# model 6J offset + eye
+set.seed(1973)
+smile__tree_model_6J <- train(smile_type ~ offset_mean + eye_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6J$results
+smile__tree_model_6J$coefnames
+varImp(smile__tree_model_6J)
+# summary(smile__tree_model_6J$finalModel)
+fancyRpartPlot(smile__tree_model_6J$finalModel)
+
+smile__tree_model_6J_pred <- predict(smile__tree_model_6J, tst_smile)
+summary(smile__tree_model_6J_pred)
+smile__tree_model_6J_confM <- confusionMatrix(
+  smile__tree_model_6J_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6J.1_pred <- predict(smile__tree_model_6J, tst_smile_boys)
+summary(smile__tree_model_6J.1_pred)
+smile__tree_model_6J.1_confM <- confusionMatrix(
+  smile__tree_model_6J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6J.1_confM
+
+set.seed(1973)
+smile__tree_model_6J.2_pred <- predict(smile__tree_model_6J, tst_smile_girls)
+summary(smile__tree_model_6J.2_pred)
+smile__tree_model_6J.2_confM <- confusionMatrix(
+  smile__tree_model_6J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6J.2_confM
+
+
+# model 6K offset + lip
+set.seed(1973)
+smile__tree_model_6K <- train(smile_type ~ offset_mean + lip_mean,
+  method = "rpart", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_6K$results
+smile__tree_model_6K$coefnames
+varImp(smile__tree_model_6K)
+# summary(smile__tree_model_6K$finalModel)
+fancyRpartPlot(smile__tree_model_6K$finalModel)
+
+smile__tree_model_6K_pred <- predict(smile__tree_model_6K, tst_smile)
+summary(smile__tree_model_6K_pred)
+smile__tree_model_6K_confM <- confusionMatrix(
+  smile__tree_model_6K_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_6K_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_6K.1_pred <- predict(smile__tree_model_6K, tst_smile_boys)
+summary(smile__tree_model_6K.1_pred)
+smile__tree_model_6K.1_confM <- confusionMatrix(
+  smile__tree_model_6K.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_6K.1_confM
+
+set.seed(1973)
+smile__tree_model_6K.2_pred <- predict(smile__tree_model_6K, tst_smile_girls)
+summary(smile__tree_model_6K.2_pred)
+smile__tree_model_6K.2_confM <- confusionMatrix(
+  smile__tree_model_6K.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_6K.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# Model 7: dynamics and AU's
+set.seed(1973)
+smile__tree_model_7 <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7$results
+smile__tree_model_7$coefnames
+varImp(smile__tree_model_7)
+# summary(smile__tree_model_7$finalModel)
+fancyRpartPlot(smile__tree_model_7$finalModel)
+
+smile__tree_model_7_pred <- predict(smile__tree_model_7, tst_smile)
+summary(smile__tree_model_7_pred)
+smile__tree_model_7_confM <- confusionMatrix(
+  smile__tree_model_7_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7.1_pred <- predict(smile__tree_model_7, tst_smile_boys)
+summary(smile__tree_model_7.1_pred)
+smile__tree_model_7.1_confM <- confusionMatrix(
+  smile__tree_model_7.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7.1_confM
+
+set.seed(1973)
+smile__tree_model_7.2_pred <- predict(smile__tree_model_7, tst_smile_girls)
+summary(smile__tree_model_7.2_pred)
+smile__tree_model_7.2_confM <- confusionMatrix(
+  smile__tree_model_7.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7.2_confM
+
+# 7A AU's + onset
+
+set.seed(1973)
+smile__tree_model_7A <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  onset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7A$results
+smile__tree_model_7A$coefnames
+varImp(smile__tree_model_7A)
+# summary(smile__tree_model_7A$finalModel)
+fancyRpartPlot(smile__tree_model_7A$finalModel)
+
+smile__tree_model_7A_pred <- predict(smile__tree_model_7A, tst_smile)
+summary(smile__tree_model_7A_pred)
+smile__tree_model_7A_confM <- confusionMatrix(
+  smile__tree_model_7A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7A.1_pred <- predict(smile__tree_model_7A, tst_smile_boys)
+summary(smile__tree_model_7A.1_pred)
+smile__tree_model_7A.1_confM <- confusionMatrix(
+  smile__tree_model_7A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7A.1_confM
+
+set.seed(1973)
+smile__tree_model_7A.2_pred <- predict(smile__tree_model_7A, tst_smile_girls)
+summary(smile__tree_model_7A.2_pred)
+smile__tree_model_7A.2_confM <- confusionMatrix(
+  smile__tree_model_7A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7A.2_confM
+
+# 7B AU's + apex
+
+set.seed(1973)
+smile__tree_model_7B <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  apex_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7B$results
+smile__tree_model_7B$coefnames
+varImp(smile__tree_model_7B)
+# summary(smile__tree_model_7B$finalModel)
+fancyRpartPlot(smile__tree_model_7B$finalModel)
+
+smile__tree_model_7B_pred <- predict(smile__tree_model_7B, tst_smile)
+summary(smile__tree_model_7B_pred)
+smile__tree_model_7B_confM <- confusionMatrix(
+  smile__tree_model_7B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7B.1_pred <- predict(smile__tree_model_7B, tst_smile_boys)
+summary(smile__tree_model_7B.1_pred)
+smile__tree_model_7B.1_confM <- confusionMatrix(
+  smile__tree_model_7B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7B.1_confM
+
+set.seed(1973)
+smile__tree_model_7B.2_pred <- predict(smile__tree_model_7B, tst_smile_girls)
+summary(smile__tree_model_7B.2_pred)
+smile__tree_model_7B.2_confM <- confusionMatrix(
+  smile__tree_model_7B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7B.2_confM
+
+# 7C AU's + offset
+
+set.seed(1973)
+smile__tree_model_7C <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7C$results
+smile__tree_model_7C$coefnames
+varImp(smile__tree_model_7C)
+# summary(smile__tree_model_7C$finalModel)
+fancyRpartPlot(smile__tree_model_7C$finalModel)
+
+smile__tree_model_7C_pred <- predict(smile__tree_model_7C, tst_smile)
+summary(smile__tree_model_7C_pred)
+smile__tree_model_7C_confM <- confusionMatrix(
+  smile__tree_model_7C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7C.1_pred <- predict(smile__tree_model_7C, tst_smile_boys)
+summary(smile__tree_model_7C.1_pred)
+smile__tree_model_7C.1_confM <- confusionMatrix(
+  smile__tree_model_7C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7C.1_confM
+
+set.seed(1973)
+smile__tree_model_7C.2_pred <- predict(smile__tree_model_7C, tst_smile_girls)
+summary(smile__tree_model_7C.2_pred)
+smile__tree_model_7C.2_confM <- confusionMatrix(
+  smile__tree_model_7C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7C.2_confM
+
+# 7D
+set.seed(1973)
+smile__tree_model_7D <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7D$results
+smile__tree_model_7D$coefnames
+varImp(smile__tree_model_7D)
+# summary(smile__tree_model_7D$finalModel)
+fancyRpartPlot(smile__tree_model_7D$finalModel)
+
+smile__tree_model_7D_pred <- predict(smile__tree_model_7D, tst_smile)
+summary(smile__tree_model_7D_pred)
+smile__tree_model_7D_confM <- confusionMatrix(
+  smile__tree_model_7D_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7D.1_pred <- predict(smile__tree_model_7D, tst_smile_boys)
+summary(smile__tree_model_7D.1_pred)
+smile__tree_model_7D.1_confM <- confusionMatrix(
+  smile__tree_model_7D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7D.1_confM
+
+set.seed(1973)
+smile__tree_model_7D.2_pred <- predict(smile__tree_model_7D, tst_smile_girls)
+summary(smile__tree_model_7D.2_pred)
+smile__tree_model_7D.2_confM <- confusionMatrix(
+  smile__tree_model_7D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7D.2_confM
+
+# 7E
+
+set.seed(1973)
+smile__tree_model_7E <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7E$results
+smile__tree_model_7E$coefnames
+varImp(smile__tree_model_7E)
+# summary(smile__tree_model_7E$finalModel)
+fancyRpartPlot(smile__tree_model_7E$finalModel)
+
+smile__tree_model_7E_pred <- predict(smile__tree_model_7E, tst_smile)
+summary(smile__tree_model_7E_pred)
+smile__tree_model_7E_confM <- confusionMatrix(
+  smile__tree_model_7E_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7E.1_pred <- predict(smile__tree_model_7E, tst_smile_boys)
+summary(smile__tree_model_7E.1_pred)
+smile__tree_model_7E.1_confM <- confusionMatrix(
+  smile__tree_model_7E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7E.1_confM
+
+set.seed(1973)
+smile__tree_model_7E.2_pred <- predict(smile__tree_model_7E, tst_smile_girls)
+summary(smile__tree_model_7E.2_pred)
+smile__tree_model_7E.2_confM <- confusionMatrix(
+  smile__tree_model_7E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7E.2_confM
+
+# 7F
+
+set.seed(1973)
+smile__tree_model_7F <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7F$results
+smile__tree_model_7F$coefnames
+varImp(smile__tree_model_7F)
+# summary(smile__tree_model_7F$finalModel)
+fancyRpartPlot(smile__tree_model_7F$finalModel)
+
+smile__tree_model_7F_pred <- predict(smile__tree_model_7F, tst_smile)
+summary(smile__tree_model_7F_pred)
+smile__tree_model_7F_confM <- confusionMatrix(
+  smile__tree_model_7F_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7F.1_pred <- predict(smile__tree_model_7F, tst_smile_boys)
+summary(smile__tree_model_7F.1_pred)
+smile__tree_model_7F.1_confM <- confusionMatrix(
+  smile__tree_model_7F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7F.1_confM
+
+set.seed(1973)
+smile__tree_model_7F.2_pred <- predict(smile__tree_model_7F, tst_smile_girls)
+summary(smile__tree_model_7F.2_pred)
+smile__tree_model_7F.2_confM <- confusionMatrix(
+  smile__tree_model_7F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7F.2_confM
+
+# 7G
+
+set.seed(1973)
+smile__tree_model_7G <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7G$results
+smile__tree_model_7G$coefnames
+varImp(smile__tree_model_7G)
+# summary(smile__tree_model_7G$finalModel)
+fancyRpartPlot(smile__tree_model_7G$finalModel)
+
+smile__tree_model_7G_pred <- predict(smile__tree_model_7G, tst_smile)
+summary(smile__tree_model_7G_pred)
+smile__tree_model_7G_confM <- confusionMatrix(
+  smile__tree_model_7G_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7G.1_pred <- predict(smile__tree_model_7G, tst_smile_boys)
+summary(smile__tree_model_7G.1_pred)
+smile__tree_model_7G.1_confM <- confusionMatrix(
+  smile__tree_model_7G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7G.1_confM
+
+set.seed(1973)
+smile__tree_model_7G.2_pred <- predict(smile__tree_model_7G, tst_smile_girls)
+summary(smile__tree_model_7G.2_pred)
+smile__tree_model_7G.2_confM <- confusionMatrix(
+  smile__tree_model_7G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7G.2_confM
+
+# 7H dynamics and AU's selection
+set.seed(1973)
+smile__tree_model_7H <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7H$results
+smile__tree_model_7H$coefnames
+varImp(smile__tree_model_7H)
+# summary(smile__tree_model_7H$finalModel)
+fancyRpartPlot(smile__tree_model_7H$finalModel)
+
+smile__tree_model_7H_pred <- predict(smile__tree_model_7H, tst_smile)
+summary(smile__tree_model_7H_pred)
+smile__tree_model_7H_confM <- confusionMatrix(
+  smile__tree_model_7H_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7H.1_pred <- predict(smile__tree_model_7H, tst_smile_boys)
+summary(smile__tree_model_7H.1_pred)
+smile__tree_model_7H.1_confM <- confusionMatrix(
+  smile__tree_model_7H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7H.1_confM
+
+set.seed(1973)
+smile__tree_model_7H.2_pred <- predict(smile__tree_model_7H, tst_smile_girls)
+summary(smile__tree_model_7H.2_pred)
+smile__tree_model_7H.2_confM <- confusionMatrix(
+  smile__tree_model_7H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7H.2_confM
+
+# 7I
+
+set.seed(1973)
+smile__tree_model_7I <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7I$results
+smile__tree_model_7I$coefnames
+varImp(smile__tree_model_7I)
+# summary(smile__tree_model_7I$finalModel)
+fancyRpartPlot(smile__tree_model_7I$finalModel)
+
+smile__tree_model_7I_pred <- predict(smile__tree_model_7I, tst_smile)
+summary(smile__tree_model_7I_pred)
+smile__tree_model_7I_confM <- confusionMatrix(
+  smile__tree_model_7I_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7I.1_pred <- predict(smile__tree_model_7I, tst_smile_boys)
+summary(smile__tree_model_7I.1_pred)
+smile__tree_model_7I.1_confM <- confusionMatrix(
+  smile__tree_model_7I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7I.1_confM
+
+set.seed(1973)
+smile__tree_model_7I.2_pred <- predict(smile__tree_model_7I, tst_smile_girls)
+summary(smile__tree_model_7I.2_pred)
+smile__tree_model_7I.2_confM <- confusionMatrix(
+  smile__tree_model_7I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7I.2_confM
+
+# 7J apex
+
+set.seed(1973)
+smile__tree_model_7J <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  apex_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7J$results
+smile__tree_model_7J$coefnames
+varImp(smile__tree_model_7J)
+# summary(smile__tree_model_7J$finalModel)
+fancyRpartPlot(smile__tree_model_7J$finalModel)
+
+smile__tree_model_7J_pred <- predict(smile__tree_model_7J, tst_smile)
+summary(smile__tree_model_7J_pred)
+smile__tree_model_7J_confM <- confusionMatrix(
+  smile__tree_model_7J_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7J.1_pred <- predict(smile__tree_model_7J, tst_smile_boys)
+summary(smile__tree_model_7J.1_pred)
+smile__tree_model_7J.1_confM <- confusionMatrix(
+  smile__tree_model_7J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7J.1_confM
+
+set.seed(1973)
+smile__tree_model_7J.2_pred <- predict(smile__tree_model_7J, tst_smile_girls)
+summary(smile__tree_model_7J.2_pred)
+smile__tree_model_7J.2_confM <- confusionMatrix(
+  smile__tree_model_7J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7J.2_confM
+
+# 7K
+
+set.seed(1973)
+smile__tree_model_7K <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  offset_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_7K$results
+smile__tree_model_7K$coefnames
+varImp(smile__tree_model_7K)
+# summary(smile__tree_model_7K$finalModel)
+fancyRpartPlot(smile__tree_model_7K$finalModel)
+
+smile__tree_model_7K_pred <- predict(smile__tree_model_7K, tst_smile)
+summary(smile__tree_model_7K_pred)
+smile__tree_model_7K_confM <- confusionMatrix(
+  smile__tree_model_7K_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_7K_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_7K.1_pred <- predict(smile__tree_model_7K, tst_smile_boys)
+summary(smile__tree_model_7K.1_pred)
+smile__tree_model_7K.1_confM <- confusionMatrix(
+  smile__tree_model_7K.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_7K.1_confM
+
+set.seed(1973)
+smile__tree_model_7K.2_pred <- predict(smile__tree_model_7K, tst_smile_girls)
+summary(smile__tree_model_7K.2_pred)
+smile__tree_model_7K.2_confM <- confusionMatrix(
+  smile__tree_model_7K.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_7K.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# 8 strongest feature combination
+
+# 8A
+set.seed(1973)
+smile__tree_model_8A <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + lip_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8A$results
+smile__tree_model_8A$coefnames
+varImp(smile__tree_model_8A)
+# summary(smile__tree_model_8A$finalModel)
+fancyRpartPlot(smile__tree_model_8A$finalModel)
+
+smile__tree_model_8A_pred <- predict(smile__tree_model_8A, tst_smile)
+summary(smile__tree_model_8A_pred)
+smile__tree_model_8A_confM <- confusionMatrix(
+  smile__tree_model_8A_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8A.1_pred <- predict(smile__tree_model_8A, tst_smile_boys)
+summary(smile__tree_model_8A.1_pred)
+smile__tree_model_8A.1_confM <- confusionMatrix(
+  smile__tree_model_8A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8A.1_confM
+
+set.seed(1973)
+smile__tree_model_8A.2_pred <- predict(smile__tree_model_8A, tst_smile_girls)
+summary(smile__tree_model_8A.2_pred)
+smile__tree_model_8A.2_confM <- confusionMatrix(
+  smile__tree_model_8A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8A.2_confM
+
+# 8B
+set.seed(1973)
+smile__tree_model_8B <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + lip_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8B$results
+smile__tree_model_8B$coefnames
+varImp(smile__tree_model_8B)
+# summary(smile__tree_model_8B$finalModel)
+fancyRpartPlot(smile__tree_model_8B$finalModel)
+
+smile__tree_model_8B_pred <- predict(smile__tree_model_8B, tst_smile)
+summary(smile__tree_model_8B_pred)
+smile__tree_model_8B_confM <- confusionMatrix(
+  smile__tree_model_8B_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8B.1_pred <- predict(smile__tree_model_8B, tst_smile_boys)
+summary(smile__tree_model_8B.1_pred)
+smile__tree_model_8B.1_confM <- confusionMatrix(
+  smile__tree_model_8B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8B.1_confM
+
+set.seed(1973)
+smile__tree_model_8B.2_pred <- predict(smile__tree_model_8B, tst_smile_girls)
+summary(smile__tree_model_8B.2_pred)
+smile__tree_model_8B.2_confM <- confusionMatrix(
+  smile__tree_model_8B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8B.2_confM
+
+# 8C
+set.seed(1973)
+smile__tree_model_8C <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean + lip_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8C$results
+smile__tree_model_8C$coefnames
+varImp(smile__tree_model_8C)
+# summary(smile__tree_model_8C$finalModel)
+fancyRpartPlot(smile__tree_model_8C$finalModel)
+
+smile__tree_model_8C_pred <- predict(smile__tree_model_8C, tst_smile)
+summary(smile__tree_model_8C_pred)
+smile__tree_model_8C_confM <- confusionMatrix(
+  smile__tree_model_8C_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8C.1_pred <- predict(smile__tree_model_8C, tst_smile_boys)
+summary(smile__tree_model_8C.1_pred)
+smile__tree_model_8C.1_confM <- confusionMatrix(
+  smile__tree_model_8C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8C.1_confM
+
+set.seed(1973)
+smile__tree_model_8C.2_pred <- predict(smile__tree_model_8C, tst_smile_girls)
+summary(smile__tree_model_8C.2_pred)
+smile__tree_model_8C.2_confM <- confusionMatrix(
+  smile__tree_model_8C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8C.2_confM
+
+# 8D
+set.seed(1973)
+smile__tree_model_8D <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean + lip_mean +
+  eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8D$results
+smile__tree_model_8D$coefnames
+varImp(smile__tree_model_8D)
+# summary(smile__tree_model_8D$finalModel)
+fancyRpartPlot(smile__tree_model_8D$finalModel)
+
+smile__tree_model_8D_pred <- predict(smile__tree_model_8D, tst_smile)
+summary(smile__tree_model_8D_pred)
+smile__tree_model_8D_confM <- confusionMatrix(
+  smile__tree_model_8D_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8D.1_pred <- predict(smile__tree_model_8D, tst_smile_boys)
+summary(smile__tree_model_8D.1_pred)
+smile__tree_model_8D.1_confM <- confusionMatrix(
+  smile__tree_model_8D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8D.1_confM
+
+set.seed(1973)
+smile__tree_model_8D.2_pred <- predict(smile__tree_model_8D, tst_smile_girls)
+summary(smile__tree_model_8D.2_pred)
+smile__tree_model_8D.2_confM <- confusionMatrix(
+  smile__tree_model_8D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8D.2_confM
+
+# 8E
+set.seed(1973)
+smile__tree_model_8E <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean + lip_mean +
+  eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8E$results
+smile__tree_model_8E$coefnames
+varImp(smile__tree_model_8E)
+# summary(smile__tree_model_8E$finalModel)
+fancyRpartPlot(smile__tree_model_8E$finalModel)
+
+smile__tree_model_8E_pred <- predict(smile__tree_model_8E, tst_smile)
+summary(smile__tree_model_8E_pred)
+smile__tree_model_8E_confM <- confusionMatrix(
+  smile__tree_model_8E_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8E.1_pred <- predict(smile__tree_model_8E, tst_smile_boys)
+summary(smile__tree_model_8E.1_pred)
+smile__tree_model_8E.1_confM <- confusionMatrix(
+  smile__tree_model_8E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8E.1_confM
+
+set.seed(1973)
+smile__tree_model_8E.2_pred <- predict(smile__tree_model_8E, tst_smile_girls)
+summary(smile__tree_model_8E.2_pred)
+smile__tree_model_8E.2_confM <- confusionMatrix(
+  smile__tree_model_8E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8E.2_confM
+
+# 8F
+set.seed(1973)
+smile__tree_model_8F <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8F$results
+smile__tree_model_8F$coefnames
+varImp(smile__tree_model_8F)
+# summary(smile__tree_model_8F$finalModel)
+fancyRpartPlot(smile__tree_model_8F$finalModel)
+
+smile__tree_model_8F_pred <- predict(smile__tree_model_8F, tst_smile)
+summary(smile__tree_model_8F_pred)
+smile__tree_model_8F_confM <- confusionMatrix(
+  smile__tree_model_8F_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8F.1_pred <- predict(smile__tree_model_8F, tst_smile_boys)
+summary(smile__tree_model_8F.1_pred)
+smile__tree_model_8F.1_confM <- confusionMatrix(
+  smile__tree_model_8F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8F.1_confM
+
+set.seed(1973)
+smile__tree_model_8F.2_pred <- predict(smile__tree_model_8F, tst_smile_girls)
+summary(smile__tree_model_8F.2_pred)
+smile__tree_model_8F.2_confM <- confusionMatrix(
+  smile__tree_model_8F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8F.2_confM
+
+# 8G
+set.seed(1973)
+smile__tree_model_8G <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8G$results
+smile__tree_model_8G$coefnames
+varImp(smile__tree_model_8G)
+# summary(smile__tree_model_8G$finalModel)
+fancyRpartPlot(smile__tree_model_8G$finalModel)
+
+smile__tree_model_8G_pred <- predict(smile__tree_model_8G, tst_smile)
+summary(smile__tree_model_8G_pred)
+smile__tree_model_8G_confM <- confusionMatrix(
+  smile__tree_model_8G_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8G.1_pred <- predict(smile__tree_model_8G, tst_smile_boys)
+summary(smile__tree_model_8G.1_pred)
+smile__tree_model_8G.1_confM <- confusionMatrix(
+  smile__tree_model_8G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8G.1_confM
+
+set.seed(1973)
+smile__tree_model_8G.2_pred <- predict(smile__tree_model_8G, tst_smile_girls)
+summary(smile__tree_model_8G.2_pred)
+smile__tree_model_8G.2_confM <- confusionMatrix(
+  smile__tree_model_8G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8G.2_confM
+
+# 8H apex
+set.seed(1973)
+smile__tree_model_8H <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8H$results
+smile__tree_model_8H$coefnames
+varImp(smile__tree_model_8H)
+# summary(smile__tree_model_8H$finalModel)
+fancyRpartPlot(smile__tree_model_8H$finalModel)
+
+smile__tree_model_8H_pred <- predict(smile__tree_model_8H, tst_smile)
+summary(smile__tree_model_8H_pred)
+smile__tree_model_8H_confM <- confusionMatrix(
+  smile__tree_model_8H_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8H.1_pred <- predict(smile__tree_model_8H, tst_smile_boys)
+summary(smile__tree_model_8H.1_pred)
+smile__tree_model_8H.1_confM <- confusionMatrix(
+  smile__tree_model_8H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8H.1_confM
+
+set.seed(1973)
+smile__tree_model_8H.2_pred <- predict(smile__tree_model_8H, tst_smile_girls)
+summary(smile__tree_model_8H.2_pred)
+smile__tree_model_8H.2_confM <- confusionMatrix(
+  smile__tree_model_8H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8H.2_confM
+
+
+# 8I offset
+set.seed(1973)
+smile__tree_model_8I <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean + eye_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8I$results
+smile__tree_model_8I$coefnames
+varImp(smile__tree_model_8I)
+# summary(smile__tree_model_8I$finalModel)
+fancyRpartPlot(smile__tree_model_8I$finalModel)
+
+smile__tree_model_8I_pred <- predict(smile__tree_model_8I, tst_smile)
+summary(smile__tree_model_8I_pred)
+smile__tree_model_8I_confM <- confusionMatrix(
+  smile__tree_model_8I_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8I.1_pred <- predict(smile__tree_model_8I, tst_smile_boys)
+summary(smile__tree_model_8I.1_pred)
+smile__tree_model_8I.1_confM <- confusionMatrix(
+  smile__tree_model_8I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8I.1_confM
+
+set.seed(1973)
+smile__tree_model_8I.2_pred <- predict(smile__tree_model_8I, tst_smile_girls)
+summary(smile__tree_model_8I.2_pred)
+smile__tree_model_8I.2_confM <- confusionMatrix(
+  smile__tree_model_8I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8I.2_confM
+
+# 8J
+set.seed(1973)
+smile__tree_model_8J <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + lip_mean,
+method = "rpart", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__tree_model_8J$results
+smile__tree_model_8J$coefnames
+varImp(smile__tree_model_8J)
+# summary(smile__tree_model_8J$finalModel)
+fancyRpartPlot(smile__tree_model_8J$finalModel)
+
+smile__tree_model_8J_pred <- predict(smile__tree_model_8J, tst_smile)
+summary(smile__tree_model_8J_pred)
+smile__tree_model_8J_confM <- confusionMatrix(
+  smile__tree_model_8J_pred,
+  tst_smile$smile_type
+)
+smile__tree_model_8J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__tree_model_8J.1_pred <- predict(smile__tree_model_8J, tst_smile_boys)
+summary(smile__tree_model_8J.1_pred)
+smile__tree_model_8J.1_confM <- confusionMatrix(
+  smile__tree_model_8J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__tree_model_8J.1_confM
+
+set.seed(1973)
+smile__tree_model_8J.2_pred <- predict(smile__tree_model_8J, tst_smile_girls)
+summary(smile__tree_model_8J.2_pred)
+smile__tree_model_8J.2_confM <- confusionMatrix(
+  smile__tree_model_8J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__tree_model_8J.2_confM
+```
+
+#### SVM complete model
+
+For SVM the kernlab package is used. The method used in the caret package is `svmlinear`. More information about the ksvm packages can be found in the citation link or `?` R help function. The trained models are divided into the same eight categories as decision trees. Two additional strong models were build for SVM. Again, multiple models per category are explored. The explanation on the categories can be found in the thesis. To train the models the `train()` function is used. The models are stored as variable. The parameter settings are explained in the thesis. The models use 10 fold cross-validation. The same pre-processing check is added to the complete model. On this first complete model, a ROC example has been visualized. As this is not an evaluation parameter in the thesis, it is not used any further. The cost function (C) is set to $1$ which is the default in for this model. To visualize the trained SVM based on two features the kernlab plot is used. Some examples are displayed in the code. The `predict()` function is used to create the predictions based on the test set, and stored as variable. For model evaluation the `confusionMatrix()` function is used and printed. 
+
+```{r message=FALSE, warning=FALSE}
+
+# load packages
+library(kernlab)
+
+# set seed
+set.seed(1973)
+
+# complete model 0 with cost function set to 1 (default)
+smile__svm_model_0 <- train(smile_type ~ .,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# check different parameters of the model results
+smile__svm_model_0
+smile__svm_model_0$results
+smile__svm_model_0$resample
+smile__svm_model_0$bestTune
+# summary(smile__svm_model_0$finalModel) - not printed
+
+# prediction on the test set and the model
+smile__svm_model_0_pred <- predict(smile__svm_model_0, newdata = tst_smile)
+
+# print prediction
+summary(smile__svm_model_0_pred)
+
+# Evaluation of the accuracy based on the confusion matrix
+smile__svm_model_0_confM <- confusionMatrix(
+  smile__svm_model_0_pred,
+  tst_smile$smile_type
+)
+
+# print the confusion matrix
+smile__svm_model_0_confM
+
+# set seed
+set.seed(1973)
+
+# complete model 0 + pre-processing - outcome does not improve!
+smile__svm_model_0.0.1 <- train(smile_type ~ .,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10),
+  preProcess = c("center", "scale")
+)
+smile__svm_model_0.0.1
+smile__svm_model_0.0.1$results
+
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_0.1_pred <- predict(smile__svm_model_0, tst_smile_boys)
+summary(smile__svm_model_0.1_pred)
+smile__svm_model_0.1_confM <- confusionMatrix(
+  smile__svm_model_0.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_0.1_confM
+
+set.seed(1973)
+smile__svm_model_0.2_pred <- predict(smile__svm_model_0, tst_smile_girls)
+summary(smile__svm_model_0.2_pred)
+smile__svm_model_0.2_confM <- confusionMatrix(
+  smile__svm_model_0.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_0.2_confM
+
+# example ROC
+
+# load packages
+library(pROC)
+# citation("pROC")
+
+# ROC model 0
+roc_0 <- roc(
+  as.numeric(tst_smile$smile_type),
+  as.numeric(as.factor(smile__svm_model_0_pred))
+)
+roc_0
+
+# Visualize the ROC model
+par(mfrow = c(1, 1))
+par(mai = c(.9, .8, .2, .2))
+plot.roc(roc_0,
+  print.auc = TRUE, col = "black", lwd = 1,
+  main = "ROC curve", xlab = "Specificity: true negative rate",
+  ylab = "Sensitivity: true positive rate",
+  xlim = c(1, 0), ylim = c(0, 1), print.thres = "best"
+)
+abline(v = 1, lty = 2)
+abline(h = 1, lty = 2)
+text(.90, .97, labels = "Ideal Model")
+points(1, 1, pch = "O", cex = 1.5)
+
+# citation("kernlab")
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 1 onset-apex-offset
+set.seed(1973)
+smile__svm_model_1 <- train(smile_type ~ onset_mean + offset_mean + apex_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__svm_model_1$results
+
+smile__svm_model_1_pred <- predict(smile__svm_model_1, newdata = tst_smile)
+summary(smile__svm_model_1_pred)
+smile__svm_model_1_confM <- confusionMatrix(
+  smile__svm_model_1_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_1_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_1.1_pred <- predict(smile__svm_model_1, tst_smile_boys)
+summary(smile__svm_model_1.1_pred)
+smile__svm_model_1.1_confM <- confusionMatrix(
+  smile__svm_model_1.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_1.1_confM
+
+set.seed(1973)
+smile__svm_model_1.2_pred <- predict(smile__svm_model_1, tst_smile_girls)
+summary(smile__svm_model_1.2_pred)
+smile__svm_model_1.2_confM <- confusionMatrix(
+  smile__svm_model_1.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_1.2_confM
+
+# Roc model 1
+
+roc_1 <- roc(
+  as.numeric(tst_smile$smile_type),
+  as.numeric(as.factor(smile__svm_model_1_pred))
+)
+roc_1
+
+par(mfrow = c(1, 1))
+par(mai = c(.9, .8, .2, .2))
+plot.roc(roc_1,
+  print.auc = TRUE, col = "black", lwd = 1,
+  main = "ROC curve", xlab = "Specificity: true negative rate",
+  ylab = "Sensitivity: true positive rate",
+  xlim = c(1, 0), ylim = c(0, 1), print.thres = "best"
+)
+abline(v = 1, lty = 2)
+abline(h = 1, lty = 2)
+text(.90, .97, labels = "Ideal Model")
+points(1, 1, pch = "O", cex = 1.5)
+
+# model 1A onset
+set.seed(1973)
+smile__svm_model_1A <- train(smile_type ~ onset_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__svm_model_1A$results
+
+
+smile__svm_model_1A_pred <- predict(smile__svm_model_1A, newdata = tst_smile)
+summary(smile__svm_model_1A_pred)
+smile__svm_model_1A_confM <- confusionMatrix(
+  smile__svm_model_1A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_1A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_1A.1_pred <- predict(smile__svm_model_1A, tst_smile_boys)
+summary(smile__svm_model_1A.1_pred)
+smile__svm_model_1A.1_confM <- confusionMatrix(
+  smile__svm_model_1A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_1A.1_confM
+
+set.seed(1973)
+smile__svm_model_1A.2_pred <- predict(smile__svm_model_1A, tst_smile_girls)
+summary(smile__svm_model_1A.2_pred)
+smile__svm_model_1A.2_confM <- confusionMatrix(
+  smile__svm_model_1A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_1A.2_confM
+
+
+# model 1B apex
+set.seed(1973)
+smile__svm_model_1B <- train(smile_type ~ apex_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__svm_model_1B$results
+
+smile__svm_model_1B_pred <- predict(smile__svm_model_1B, newdata = tst_smile)
+summary(smile__svm_model_1B_pred)
+smile__svm_model_1B_confM <- confusionMatrix(
+  smile__svm_model_1B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_1B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_1B.1_pred <- predict(smile__svm_model_1B, tst_smile_boys)
+summary(smile__svm_model_1B.1_pred)
+smile__svm_model_1B.1_confM <- confusionMatrix(
+  smile__svm_model_1B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_1B.1_confM
+
+set.seed(1973)
+smile__svm_model_1B.2_pred <- predict(smile__svm_model_1B, tst_smile_girls)
+summary(smile__svm_model_1B.2_pred)
+smile__svm_model_1B.2_confM <- confusionMatrix(
+  smile__svm_model_1B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_1B.2_confM
+
+
+# model 1C offset
+set.seed(1973)
+smile__svm_model_1C <- train(smile_type ~ offset_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+smile__svm_model_1C$results
+
+
+smile__svm_model_1C_pred <- predict(smile__svm_model_1C, newdata = tst_smile)
+summary(smile__svm_model_1C_pred)
+smile__svm_model_1C_confM <- confusionMatrix(
+  smile__svm_model_1C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_1C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_1C.1_pred <- predict(smile__svm_model_1C, tst_smile_boys)
+summary(smile__svm_model_1C.1_pred)
+smile__svm_model_1C.1_confM <- confusionMatrix(
+  smile__svm_model_1C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_1C.1_confM
+
+set.seed(1973)
+smile__svm_model_1C.2_pred <- predict(smile__svm_model_1C, tst_smile_girls)
+summary(smile__svm_model_1C.2_pred)
+smile__svm_model_1C.2_confM <- confusionMatrix(
+  smile__svm_model_1C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_1C.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 2 complete excluding subject info
+set.seed(1973)
+smile__svm_model_2 <- train(smile_type ~ . - subject - age,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10),
+)
+
+smile__svm_model_2$results
+
+
+smile__svm_model_2_pred <- predict(smile__svm_model_2, tst_smile)
+summary(smile__svm_model_2_pred)
+smile__tree_svm_2_confM <- confusionMatrix(
+  smile__svm_model_2_pred,
+  tst_smile$smile_type
+)
+smile__tree_svm_2_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_2.1_pred <- predict(smile__svm_model_2, tst_smile_boys)
+summary(smile__svm_model_2.1_pred)
+smile__svm_model_2.1_confM <- confusionMatrix(
+  smile__svm_model_2.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_2.1_confM
+
+set.seed(1973)
+smile__svm_model_2.2_pred <- predict(smile__svm_model_2, tst_smile_girls)
+summary(smile__svm_model_2.2_pred)
+smile__svm_model_2.2_confM <- confusionMatrix(
+  smile__svm_model_2.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_2.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 3 complete lip and eye features
+set.seed(1973)
+smile__svm_model_3 <- train(smile_type ~ lip_mean + eye_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_3$results
+summary(smile__svm_model_3$finalModel)
+kernlab::plot(smile__svm_model_3$finalModel)
+
+smile__svm_model_3_pred <- predict(smile__svm_model_3, tst_smile)
+summary(smile__svm_model_3_pred)
+smile__svm_model_3_confM <- confusionMatrix(
+  smile__svm_model_3_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_3_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_3.1_pred <- predict(smile__svm_model_3, tst_smile_boys)
+summary(smile__svm_model_3.1_pred)
+smile__svm_model_3.1_confM <- confusionMatrix(
+  smile__svm_model_3.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_3.1_confM
+
+set.seed(1973)
+smile__svm_model_3.2_pred <- predict(smile__svm_model_3, tst_smile_girls)
+summary(smile__svm_model_3.2_pred)
+smile__svm_model_3.2_confM <- confusionMatrix(
+  smile__svm_model_3.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_3.2_confM
+
+
+# model 3A complete lip and eye features
+set.seed(1973)
+smile__svm_model_3A <- train(smile_type ~ lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_3A$results
+summary(smile__svm_model_3A$finalModel)
+
+smile__svm_model_3A_pred <- predict(smile__svm_model_3A, tst_smile)
+summary(smile__svm_model_3A_pred)
+smile__svm_model_3A_confM <- confusionMatrix(
+  smile__svm_model_3A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_3A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_3A.1_pred <- predict(smile__svm_model_3A, tst_smile_boys)
+summary(smile__svm_model_3A.1_pred)
+smile__svm_model_3A.1_confM <- confusionMatrix(
+  smile__svm_model_3A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_3A.1_confM
+
+set.seed(1973)
+smile__svm_model_3A.2_pred <- predict(smile__svm_model_3A, tst_smile_girls)
+summary(smile__svm_model_3A.2_pred)
+smile__svm_model_3A.2_confM <- confusionMatrix(
+  smile__svm_model_3A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_3A.2_confM
+
+# model 3B eye
+set.seed(1973)
+smile__svm_model_3B <- train(smile_type ~ eye_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_3B$results
+summary(smile__svm_model_3B$finalModel)
+
+smile__svm_model_3B_pred <- predict(smile__svm_model_3B, tst_smile)
+summary(smile__svm_model_3B_pred)
+smile__svm_model_3B_confM <- confusionMatrix(
+  smile__svm_model_3B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_3B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_3B.1_pred <- predict(smile__svm_model_3B, tst_smile_boys)
+summary(smile__svm_model_3B.1_pred)
+smile__svm_model_3B.1_confM <- confusionMatrix(
+  smile__svm_model_3B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_3B.1_confM
+
+set.seed(1973)
+smile__svm_model_3B.2_pred <- predict(smile__svm_model_3B, tst_smile_girls)
+summary(smile__svm_model_3B.2_pred)
+smile__svm_model_3B.2_confM <- confusionMatrix(
+  smile__svm_model_3B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_3B.2_confM
+
+
+# model 3C lip
+set.seed(1973)
+smile__svm_model_3C <- train(smile_type ~ eye_mean + lip_mean + amplitude_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_3C$results
+summary(smile__svm_model_3C$finalModel)
+
+smile__svm_model_3C_pred <- predict(smile__svm_model_3C, tst_smile)
+summary(smile__svm_model_3C_pred)
+smile__svm_model_3C_confM <- confusionMatrix(
+  smile__svm_model_3C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_3C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_3C.1_pred <- predict(smile__svm_model_3C, tst_smile_boys)
+summary(smile__svm_model_3C.1_pred)
+smile__svm_model_3C.1_confM <- confusionMatrix(
+  smile__svm_model_3C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_3C.1_confM
+
+set.seed(1973)
+smile__svm_model_3C.2_pred <- predict(smile__svm_model_3C, tst_smile_girls)
+summary(smile__svm_model_3C.2_pred)
+smile__svm_model_3C.2_confM <- confusionMatrix(
+  smile__svm_model_3C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_3C.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 4 AU features
+set.seed(1973)
+smile__svm_model_4 <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_4$results
+summary(smile__svm_model_4$finalModel)
+
+smile__svm_model_4_pred <- predict(smile__svm_model_4, tst_smile)
+summary(smile__svm_model_4_pred)
+smile__svm_model_4_confM <- confusionMatrix(
+  smile__svm_model_4_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4.1_pred <- predict(smile__svm_model_4, tst_smile_boys)
+summary(smile__svm_model_4.1_pred)
+smile__svm_model_4.1_confM <- confusionMatrix(
+  smile__svm_model_4.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4.1_confM
+
+set.seed(1973)
+smile__svm_model_4.2_pred <- predict(smile__svm_model_4, tst_smile_girls)
+summary(smile__svm_model_4.2_pred)
+smile__svm_model_4.2_confM <- confusionMatrix(
+  smile__svm_model_4.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4.2_confM
+
+
+# model 4A AU happiness model
+set.seed(1973)
+smile__svm_model_4A <- train(smile_type ~ AU06_r_mean + AU12_r_mean,
+  method = "svmLinear",
+  data = trn_smile,
+  trControl = trainControl(
+    method = "cv",
+    number = 10
+  )
+)
+
+smile__svm_model_4A$results
+summary(smile__svm_model_4A$finalModel)
+kernlab::plot(smile__svm_model_4A$finalModel, xlab = "AU12", ylab = "AU06")
+
+smile__svm_model_4A_pred <- predict(smile__svm_model_4A, tst_smile)
+summary(smile__svm_model_4A_pred)
+smile__svm_model_4A_confM <- confusionMatrix(
+  smile__svm_model_4A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4A.1_pred <- predict(smile__svm_model_4A, tst_smile_boys)
+summary(smile__svm_model_4A.1_pred)
+smile__svm_model_4A.1_confM <- confusionMatrix(
+  smile__svm_model_4A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4A.1_confM
+
+set.seed(1973)
+smile__svm_model_4A.2_pred <- predict(smile__svm_model_4A, tst_smile_girls)
+summary(smile__svm_model_4A.2_pred)
+smile__svm_model_4A.2_confM <- confusionMatrix(
+  smile__svm_model_4A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4A.2_confM
+
+
+# model 4B AU best model
+set.seed(1973)
+smile__svm_model_4B <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean,
+method = "svmLinear",
+data = trn_smile,
+trControl = trainControl(
+  method = "cv",
+  number = 10
+)
+)
+
+smile__svm_model_4B$results
+summary(smile__svm_model_4B$finalModel)
+
+smile__svm_model_4B_pred <- predict(smile__svm_model_4B, tst_smile)
+summary(smile__svm_model_4B_pred)
+smile__svm_model_4B_confM <- confusionMatrix(
+  smile__svm_model_4B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4B.1_pred <- predict(smile__svm_model_4B, tst_smile_boys)
+summary(smile__svm_model_4B.1_pred)
+smile__svm_model_4B.1_confM <- confusionMatrix(
+  smile__svm_model_4B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4B.1_confM
+
+set.seed(1973)
+smile__svm_model_4B.2_pred <- predict(smile__svm_model_4B, tst_smile_girls)
+summary(smile__svm_model_4B.2_pred)
+smile__svm_model_4B.2_confM <- confusionMatrix(
+  smile__svm_model_4B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4B.2_confM
+
+
+# model 4C AU happiness model + blink
+set.seed(1973)
+smile__svm_model_4C <- train(smile_type ~ AU45_r_mean + AU06_r_mean +
+  AU12_r_mean,
+method = "svmLinear",
+data = trn_smile,
+trControl = trainControl(
+  method = "cv",
+  number = 10
+)
+)
+
+smile__svm_model_4C$results
+summary(smile__svm_model_4C$finalModel)
+
+smile__svm_model_4C_pred <- predict(smile__svm_model_4C, tst_smile)
+summary(smile__svm_model_4C_pred)
+smile__svm_model_4C_confM <- confusionMatrix(
+  smile__svm_model_4C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4C.1_pred <- predict(smile__svm_model_4C, tst_smile_boys)
+summary(smile__svm_model_4C.1_pred)
+smile__svm_model_4C.1_confM <- confusionMatrix(
+  smile__svm_model_4C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4C.1_confM
+
+set.seed(1973)
+smile__svm_model_4C.2_pred <- predict(smile__svm_model_4C, tst_smile_girls)
+summary(smile__svm_model_4C.2_pred)
+smile__svm_model_4C.2_confM <- confusionMatrix(
+  smile__svm_model_4C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4C.2_confM
+
+
+# model 4D AU45
+set.seed(1973)
+smile__svm_model_4D <-
+  train(smile_type ~ AU45_r_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4D$results
+summary(smile__svm_model_4D$finalModel)
+
+smile__svm_model_4D_pred <- predict(smile__svm_model_4D, tst_smile)
+summary(smile__svm_model_4D_pred)
+smile__svm_model_4D_confM <- confusionMatrix(
+  smile__svm_model_4D_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4D.1_pred <- predict(smile__svm_model_4D, tst_smile_boys)
+summary(smile__svm_model_4D.1_pred)
+smile__svm_model_4D.1_confM <- confusionMatrix(
+  smile__svm_model_4D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4D.1_confM
+
+set.seed(1973)
+smile__svm_model_4D.2_pred <- predict(smile__svm_model_4D, tst_smile_girls)
+summary(smile__svm_model_4D.2_pred)
+smile__svm_model_4D.2_confM <- confusionMatrix(
+  smile__svm_model_4D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4D.2_confM
+
+
+# model 4E AU12
+set.seed(1973)
+smile__svm_model_4E <-
+  train(smile_type ~ AU12_r_mean,
+    method = "svmLinear",
+    data = trn_smile, trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4E$results
+summary(smile__svm_model_4E$finalModel)
+
+smile__svm_model_4E_pred <- predict(smile__svm_model_4E, tst_smile)
+summary(smile__svm_model_4E_pred)
+smile__svm_model_4E_confM <- confusionMatrix(
+  smile__svm_model_4E_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4E.1_pred <- predict(smile__svm_model_4E, tst_smile_boys)
+summary(smile__svm_model_4E.1_pred)
+smile__svm_model_4E.1_confM <- confusionMatrix(
+  smile__svm_model_4E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4E.1_confM
+
+set.seed(1973)
+smile__svm_model_4E.2_pred <- predict(smile__svm_model_4E, tst_smile_girls)
+summary(smile__svm_model_4E.2_pred)
+smile__svm_model_4E.2_confM <- confusionMatrix(
+  smile__svm_model_4E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4E.2_confM
+
+
+# model 4F AU06
+set.seed(1973)
+smile__svm_model_4F <-
+  train(smile_type ~ AU06_r_mean,
+    method = "svmLinear",
+    data = trn_smile, trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4F$results
+summary(smile__svm_model_4F$finalModel)
+
+smile__svm_model_4F_pred <- predict(smile__svm_model_4F, tst_smile)
+summary(smile__svm_model_4F_pred)
+smile__svm_model_4F_confM <- confusionMatrix(
+  smile__svm_model_4F_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4F.1_pred <- predict(smile__svm_model_4F, tst_smile_boys)
+summary(smile__svm_model_4F.1_pred)
+smile__svm_model_4F.1_confM <- confusionMatrix(
+  smile__svm_model_4F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4F.1_confM
+
+set.seed(1973)
+smile__svm_model_4F.2_pred <- predict(smile__svm_model_4F, tst_smile_girls)
+summary(smile__svm_model_4F.2_pred)
+smile__svm_model_4F.2_confM <- confusionMatrix(
+  smile__svm_model_4F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4F.2_confM
+
+
+# model 4G AU10
+set.seed(1973)
+smile__svm_model_4G <-
+  train(smile_type ~ AU10_r_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4G$results
+summary(smile__svm_model_4G$finalModel)
+
+smile__svm_model_4G_pred <- predict(smile__svm_model_4G, tst_smile)
+summary(smile__svm_model_4G_pred)
+smile__svm_model_4G_confM <- confusionMatrix(
+  smile__svm_model_4G_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4G.1_pred <- predict(smile__svm_model_4G, tst_smile_boys)
+summary(smile__svm_model_4G.1_pred)
+smile__svm_model_4G.1_confM <- confusionMatrix(
+  smile__svm_model_4G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4G.1_confM
+
+set.seed(1973)
+smile__svm_model_4G.2_pred <- predict(smile__svm_model_4G, tst_smile_girls)
+summary(smile__svm_model_4G.2_pred)
+smile__svm_model_4G.2_confM <- confusionMatrix(
+  smile__svm_model_4G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4G.2_confM
+
+
+# model 4H AU01
+set.seed(1973)
+smile__svm_model_4H <-
+  train(smile_type ~ AU01_r_mean,
+    method = "svmLinear",
+    data = trn_smile, trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4H$results
+summary(smile__svm_model_4H$finalModel)
+
+smile__svm_model_4H_pred <- predict(smile__svm_model_4H, tst_smile)
+summary(smile__svm_model_4H_pred)
+smile__svm_model_4H_confM <- confusionMatrix(
+  smile__svm_model_4H_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4H.1_pred <- predict(smile__svm_model_4H, tst_smile_boys)
+summary(smile__svm_model_4H.1_pred)
+smile__svm_model_4H.1_confM <- confusionMatrix(
+  smile__svm_model_4H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4H.1_confM
+
+set.seed(1973)
+smile__svm_model_4H.2_pred <- predict(smile__svm_model_4H, tst_smile_girls)
+summary(smile__svm_model_4H.2_pred)
+smile__svm_model_4H.2_confM <- confusionMatrix(
+  smile__svm_model_4H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4H.2_confM
+
+
+# model 4I AU25
+set.seed(1973)
+smile__svm_model_4I <-
+  train(smile_type ~ AU25_r_mean,
+    method = "svmLinear",
+    data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4I$results
+summary(smile__svm_model_4I$finalModel)
+
+smile__svm_model_4I_pred <- predict(smile__svm_model_4I, tst_smile)
+summary(smile__svm_model_4I_pred)
+smile__svm_model_4I_confM <- confusionMatrix(
+  smile__svm_model_4I_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4I.1_pred <- predict(smile__svm_model_4I, tst_smile_boys)
+summary(smile__svm_model_4I.1_pred)
+smile__svm_model_4I.1_confM <- confusionMatrix(
+  smile__svm_model_4I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4I.1_confM
+
+set.seed(1973)
+smile__svm_model_4I.2_pred <- predict(smile__svm_model_4I, tst_smile_girls)
+summary(smile__svm_model_4I.2_pred)
+smile__svm_model_4I.2_confM <- confusionMatrix(
+  smile__svm_model_4I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4I.2_confM
+
+
+# model 4J AU09
+set.seed(1973)
+smile__svm_model_4J <-
+  train(smile_type ~ AU09_r_mean,
+    method = "svmLinear",
+    data = trn_smile, trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_4J$results
+summary(smile__svm_model_4J$finalModel)
+
+smile__svm_model_4J_pred <- predict(smile__svm_model_4J, tst_smile)
+summary(smile__svm_model_4J_pred)
+smile__svm_model_4J_confM <- confusionMatrix(
+  smile__svm_model_4J_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_4J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_4J.1_pred <- predict(smile__svm_model_4J, tst_smile_boys)
+summary(smile__svm_model_4J.1_pred)
+smile__svm_model_4J.1_confM <- confusionMatrix(
+  smile__svm_model_4J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_4J.1_confM
+
+set.seed(1973)
+smile__svm_model_4J.2_pred <- predict(smile__svm_model_4J, tst_smile_girls)
+summary(smile__svm_model_4J.2_pred)
+smile__svm_model_4J.2_confM <- confusionMatrix(
+  smile__svm_model_4J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_4J.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 5 head pose features
+set.seed(1973)
+smile__svm_model_5 <-
+  train(smile_type ~ pose_Rx_mean + pose_Ry_mean + pose_Rz_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_5$results
+summary(smile__svm_model_5$finalModel)
+
+smile__svm_model_5_pred <- predict(smile__svm_model_5, tst_smile)
+summary(smile__svm_model_5_pred)
+smile__svm_model_5_confM <- confusionMatrix(
+  smile__svm_model_5_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_5_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_5.1_pred <- predict(smile__svm_model_5, tst_smile_boys)
+summary(smile__svm_model_5.1_pred)
+smile__svm_model_5.1_confM <- confusionMatrix(
+  smile__svm_model_5.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_5.1_confM
+
+set.seed(1973)
+smile__svm_model_5.2_pred <- predict(smile__svm_model_5, tst_smile_girls)
+summary(smile__svm_model_5.2_pred)
+smile__svm_model_5.2_confM <- confusionMatrix(
+  smile__svm_model_5.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_5.2_confM
+
+
+# model 5A gaze features
+set.seed(1973)
+smile__svm_model_5A <- train(smile_type ~ gaze_angle_x_mean + gaze_angle_y_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_5A$results
+summary(smile__svm_model_5A$finalModel)
+
+smile__svm_model_5A_pred <- predict(smile__svm_model_5A, tst_smile)
+summary(smile__svm_model_5A_pred)
+smile__svm_model_5A_confM <- confusionMatrix(
+  smile__svm_model_5A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_5A_confM
+
+set.seed(1973)
+smile__svm_model_5A.1_pred <- predict(smile__svm_model_5A, tst_smile_boys)
+summary(smile__svm_model_5A.1_pred)
+smile__svm_model_5A.1_confM <- confusionMatrix(
+  smile__svm_model_5A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_5A.1_confM
+
+set.seed(1973)
+smile__svm_model_5A.2_pred <- predict(smile__svm_model_5A, tst_smile_girls)
+summary(smile__svm_model_5A.2_pred)
+smile__svm_model_5A.2_confM <- confusionMatrix(
+  smile__svm_model_5A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_5A.2_confM
+
+
+# model 5B gaze + head pose features
+set.seed(1973)
+smile__svm_model_5B <-
+  train(smile_type ~ pose_Rx_mean + pose_Ry_mean + pose_Rz_mean +
+    gaze_angle_x_mean + gaze_angle_y_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_5B$results
+summary(smile__svm_model_5B$finalModel)
+
+smile__svm_model_5B_pred <- predict(smile__svm_model_5B, tst_smile)
+summary(smile__svm_model_5B_pred)
+smile__svm_model_5B_confM <- confusionMatrix(
+  smile__svm_model_5B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_5B_confM
+
+set.seed(1973)
+smile__svm_model_5B.1_pred <- predict(smile__svm_model_5B, tst_smile_boys)
+summary(smile__svm_model_5B.1_pred)
+smile__svm_model_5B.1_confM <- confusionMatrix(
+  smile__svm_model_5B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_5B.1_confM
+
+set.seed(1973)
+smile__svm_model_5B.2_pred <- predict(smile__svm_model_5B, tst_smile_girls)
+summary(smile__svm_model_5B.2_pred)
+smile__svm_model_5B.2_confM <- confusionMatrix(
+  smile__svm_model_5B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_5B.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# model 6 dynamics and movement
+set.seed(1973)
+smile__svm_model_6 <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + eye_mean + lip_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_6$results
+summary(smile__svm_model_6$finalModel)
+
+smile__svm_model_6_pred <- predict(smile__svm_model_6, tst_smile)
+summary(smile__svm_model_6_pred)
+smile__svm_model_6_confM <- confusionMatrix(
+  smile__svm_model_6_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6.1_pred <- predict(smile__svm_model_6, tst_smile_boys)
+summary(smile__svm_model_6.1_pred)
+smile__svm_model_6.1_confM <- confusionMatrix(
+  smile__svm_model_6.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6.1_confM
+
+set.seed(1973)
+smile__svm_model_6.2_pred <- predict(smile__svm_model_6, tst_smile_girls)
+summary(smile__svm_model_6.2_pred)
+smile__svm_model_6.2_confM <- confusionMatrix(
+  smile__svm_model_6.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6.2_confM
+
+
+# model 6A dynamics and eye
+set.seed(1973)
+smile__svm_model_6A <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + eye_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_6A$results
+summary(smile__svm_model_6A$finalModel)
+
+smile__svm_model_6A_pred <- predict(smile__svm_model_6A, tst_smile)
+summary(smile__svm_model_6A_pred)
+smile__svm_model_6A_confM <- confusionMatrix(
+  smile__svm_model_6A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6A.1_pred <- predict(smile__svm_model_6A, tst_smile_boys)
+summary(smile__svm_model_6A.1_pred)
+smile__svm_model_6A.1_confM <- confusionMatrix(
+  smile__svm_model_6A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6A.1_confM
+
+set.seed(1973)
+smile__svm_model_6A.2_pred <- predict(smile__svm_model_6A, tst_smile_girls)
+summary(smile__svm_model_6A.2_pred)
+smile__svm_model_6A.2_confM <- confusionMatrix(
+  smile__svm_model_6A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6A.2_confM
+
+
+# model 6B dynamics and lip
+set.seed(1973)
+smile__svm_model_6B <-
+  train(smile_type ~ onset_mean + apex_mean + offset_mean + lip_mean,
+    method = "svmLinear", data = trn_smile,
+    trControl = trainControl(method = "cv", number = 10)
+  )
+
+smile__svm_model_6B$results
+summary(smile__svm_model_6B$finalModel)
+
+smile__svm_model_6B_pred <- predict(smile__svm_model_6B, tst_smile)
+summary(smile__svm_model_6B_pred)
+smile__svm_model_6B_confM <- confusionMatrix(
+  smile__svm_model_6B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6B.1_pred <- predict(smile__svm_model_6B, tst_smile_boys)
+summary(smile__svm_model_6B.1_pred)
+smile__svm_model_6B.1_confM <- confusionMatrix(
+  smile__svm_model_6B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6B.1_confM
+
+set.seed(1973)
+smile__svm_model_6B.2_pred <- predict(smile__svm_model_6B, tst_smile_girls)
+summary(smile__svm_model_6B.2_pred)
+smile__svm_model_6B.2_confM <- confusionMatrix(
+  smile__svm_model_6B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6B.2_confM
+
+
+# model 6C onset and movement
+set.seed(1973)
+smile__svm_model_6C <- train(smile_type ~ onset_mean + eye_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6C$results
+summary(smile__svm_model_6C$finalModel)
+
+smile__svm_model_6C_pred <- predict(smile__svm_model_6C, tst_smile)
+summary(smile__svm_model_6C_pred)
+smile__svm_model_6C_confM <- confusionMatrix(
+  smile__svm_model_6C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6C.1_pred <- predict(smile__svm_model_6C, tst_smile_boys)
+summary(smile__svm_model_6C.1_pred)
+smile__svm_model_6C.1_confM <- confusionMatrix(
+  smile__svm_model_6C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6C.1_confM
+
+set.seed(1973)
+smile__svm_model_6C.2_pred <- predict(smile__svm_model_6C, tst_smile_girls)
+summary(smile__svm_model_6C.2_pred)
+smile__svm_model_6C.2_confM <- confusionMatrix(
+  smile__svm_model_6C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6C.2_confM
+
+
+# model 6D onset + eye
+set.seed(1973)
+smile__svm_model_6D <- train(smile_type ~ onset_mean + eye_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6D$results
+summary(smile__svm_model_6D$finalModel)
+kernlab::plot(smile__svm_model_6D$finalModel)
+
+smile__svm_model_6D_pred <- predict(smile__svm_model_6D, tst_smile)
+summary(smile__svm_model_6D_pred)
+smile__svm_model_6D_confM <- confusionMatrix(
+  smile__svm_model_6D_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6D.1_pred <- predict(smile__svm_model_6D, tst_smile_boys)
+summary(smile__svm_model_6D.1_pred)
+smile__svm_model_6D.1_confM <- confusionMatrix(
+  smile__svm_model_6D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6D.1_confM
+
+set.seed(1973)
+smile__svm_model_6D.2_pred <- predict(smile__svm_model_6D, tst_smile_girls)
+summary(smile__svm_model_6D.2_pred)
+smile__svm_model_6D.2_confM <- confusionMatrix(
+  smile__svm_model_6D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6D.2_confM
+
+
+# model 6E onset + lip
+set.seed(1973)
+smile__svm_model_6E <- train(smile_type ~ onset_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6E$results
+summary(smile__svm_model_6E$finalModel)
+kernlab::plot(smile__svm_model_6E$finalModel)
+
+smile__svm_model_6E_pred <- predict(smile__svm_model_6E, tst_smile)
+summary(smile__svm_model_6E_pred)
+smile__svm_model_6E_confM <- confusionMatrix(
+  smile__svm_model_6E_pred,
+  tst_smile$smile_type
+)
+print(smile__svm_model_6E_confM)
+
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6E.1_pred <- predict(smile__svm_model_6E, tst_smile_boys)
+summary(smile__svm_model_6E.1_pred)
+smile__svm_model_6E.1_confM <- confusionMatrix(
+  smile__svm_model_6E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6E.1_confM
+
+set.seed(1973)
+smile__svm_model_6E.2_pred <- predict(smile__svm_model_6E, tst_smile_girls)
+summary(smile__svm_model_6E.2_pred)
+smile__svm_model_6E.2_confM <- confusionMatrix(
+  smile__svm_model_6E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6E.2_confM
+
+
+# model 6F apex + movements
+set.seed(1973)
+smile__svm_model_6F <- train(smile_type ~ apex_mean + eye_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6F$results
+summary(smile__svm_model_6F$finalModel)
+
+smile__svm_model_6F_pred <- predict(smile__svm_model_6F, tst_smile)
+summary(smile__svm_model_6F_pred)
+smile__svm_model_6F_confM <- confusionMatrix(
+  smile__svm_model_6F_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6F.1_pred <- predict(smile__svm_model_6F, tst_smile_boys)
+summary(smile__svm_model_6F.1_pred)
+smile__svm_model_6F.1_confM <- confusionMatrix(
+  smile__svm_model_6F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6F.1_confM
+
+set.seed(1973)
+smile__svm_model_6F.2_pred <- predict(smile__svm_model_6F, tst_smile_girls)
+summary(smile__svm_model_6F.2_pred)
+smile__svm_model_6F.2_confM <- confusionMatrix(
+  smile__svm_model_6F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6F.2_confM
+
+
+# model 6G apex + eye
+set.seed(1973)
+smile__svm_model_6G <- train(smile_type ~ apex_mean + eye_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6G$results
+summary(smile__svm_model_6G$finalModel)
+plot(smile__svm_model_6G$finalModel)
+
+smile__svm_model_6G_pred <- predict(smile__svm_model_6G, tst_smile)
+summary(smile__svm_model_6G_pred)
+smile__svm_model_6G_confM <- confusionMatrix(
+  smile__svm_model_6G_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6G.1_pred <- predict(smile__svm_model_6G, tst_smile_boys)
+summary(smile__svm_model_6G.1_pred)
+smile__svm_model_6G.1_confM <- confusionMatrix(
+  smile__svm_model_6G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6G.1_confM
+
+set.seed(1973)
+smile__svm_model_6G.2_pred <- predict(smile__svm_model_6G, tst_smile_girls)
+summary(smile__svm_model_6G.2_pred)
+smile__svm_model_6G.2_confM <- confusionMatrix(
+  smile__svm_model_6G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6G.2_confM
+
+
+# model 6H apex + lip
+set.seed(1973)
+smile__svm_model_6H <- train(smile_type ~ apex_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6H$results
+summary(smile__svm_model_6H$finalModel)
+kernlab::plot(smile__svm_model_6H$finalModel)
+
+smile__svm_model_6H_pred <- predict(smile__svm_model_6H, tst_smile)
+summary(smile__svm_model_6H_pred)
+smile__svm_model_6H_confM <- confusionMatrix(
+  smile__svm_model_6H_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6H.1_pred <- predict(smile__svm_model_6H, tst_smile_boys)
+summary(smile__svm_model_6H.1_pred)
+smile__svm_model_6H.1_confM <- confusionMatrix(
+  smile__svm_model_6H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6H.1_confM
+
+set.seed(1973)
+smile__svm_model_6H.2_pred <- predict(smile__svm_model_6H, tst_smile_girls)
+summary(smile__svm_model_6H.2_pred)
+smile__svm_model_6H.2_confM <- confusionMatrix(
+  smile__svm_model_6H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6H.2_confM
+
+
+# model 6I offset and movement
+set.seed(1973)
+smile__svm_model_6I <- train(smile_type ~ offset_mean + eye_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6I$results
+summary(smile__svm_model_6I$finalModel)
+
+smile__svm_model_6I_pred <- predict(smile__svm_model_6I, tst_smile)
+summary(smile__svm_model_6I_pred)
+smile__svm_model_6I_confM <- confusionMatrix(
+  smile__svm_model_6I_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6I.1_pred <- predict(smile__svm_model_6I, tst_smile_boys)
+summary(smile__svm_model_6I.1_pred)
+smile__svm_model_6I.1_confM <- confusionMatrix(
+  smile__svm_model_6I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6I.1_confM
+
+set.seed(1973)
+smile__svm_model_6I.2_pred <- predict(smile__svm_model_6I, tst_smile_girls)
+summary(smile__svm_model_6I.2_pred)
+smile__svm_model_6I.2_confM <- confusionMatrix(
+  smile__svm_model_6I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6I.2_confM
+
+
+# model 6J offset + eye
+set.seed(1973)
+smile__svm_model_6J <- train(smile_type ~ offset_mean + eye_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6J$results
+summary(smile__svm_model_6J$finalModel)
+kernlab::plot(smile__svm_model_6J$finalModel)
+
+smile__svm_model_6J_pred <- predict(smile__svm_model_6J, tst_smile)
+summary(smile__svm_model_6J_pred)
+smile__svm_model_6J_confM <- confusionMatrix(
+  smile__svm_model_6J_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6J.1_pred <- predict(smile__svm_model_6J, tst_smile_boys)
+summary(smile__svm_model_6J.1_pred)
+smile__svm_model_6J.1_confM <- confusionMatrix(
+  smile__svm_model_6J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6J.1_confM
+
+set.seed(1973)
+smile__svm_model_6J.2_pred <- predict(smile__svm_model_6J, tst_smile_girls)
+summary(smile__svm_model_6J.2_pred)
+smile__svm_model_6J.2_confM <- confusionMatrix(
+  smile__svm_model_6J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6J.2_confM
+
+
+# model 6K offset + lip
+set.seed(1973)
+smile__svm_model_6K <- train(smile_type ~ offset_mean + lip_mean,
+  method = "svmLinear", data = trn_smile,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_6K
+smile__svm_model_6K$results
+summary(smile__svm_model_6K$finalModel)
+kernlab::plot(smile__svm_model_6K$finalModel)
+smile__svm_model_6K$bestTune
+
+smile__svm_model_6K_pred <- predict(smile__svm_model_6K, tst_smile)
+summary(smile__svm_model_6K_pred)
+smile__svm_model_6K_confM <- confusionMatrix(
+  smile__svm_model_6K_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_6K_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_6K.1_pred <- predict(smile__svm_model_6K, tst_smile_boys)
+summary(smile__svm_model_6K.1_pred)
+smile__svm_model_6K.1_confM <- confusionMatrix(
+  smile__svm_model_6K.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_6K.1_confM
+
+set.seed(1973)
+smile__svm_model_6K.2_pred <- predict(smile__svm_model_6K, tst_smile_girls)
+summary(smile__svm_model_6K.2_pred)
+smile__svm_model_6K.2_confM <- confusionMatrix(
+  smile__svm_model_6K.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_6K.2_confM
+```
+
+
+```{r message=FALSE, warning=FALSE}
+# dynamics and AU's
+set.seed(1973)
+smile__svm_model_7 <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7$results
+summary(smile__svm_model_7$finalModel)
+
+smile__svm_model_7_pred <- predict(smile__svm_model_7, tst_smile)
+summary(smile__svm_model_7_pred)
+smile__svm_model_7_confM <- confusionMatrix(
+  smile__svm_model_7_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7.1_pred <- predict(smile__svm_model_7, tst_smile_boys)
+summary(smile__svm_model_7.1_pred)
+smile__svm_model_7.1_confM <- confusionMatrix(
+  smile__svm_model_7.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7.1_confM
+
+set.seed(1973)
+smile__svm_model_7.2_pred <- predict(smile__svm_model_7, tst_smile_girls)
+summary(smile__svm_model_7.2_pred)
+smile__svm_model_7.2_confM <- confusionMatrix(
+  smile__svm_model_7.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7.2_confM
+
+# 7A AU's and onset
+
+set.seed(1973)
+smile__svm_model_7A <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  onset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7A$results
+summary(smile__svm_model_7A$finalModel)
+
+smile__svm_model_7A_pred <- predict(smile__svm_model_7A, tst_smile)
+summary(smile__svm_model_7A_pred)
+smile__svm_model_7A_confM <- confusionMatrix(
+  smile__svm_model_7A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7A.1_pred <- predict(smile__svm_model_7A, tst_smile_boys)
+summary(smile__svm_model_7A.1_pred)
+smile__svm_model_7A.1_confM <- confusionMatrix(
+  smile__svm_model_7A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7A.1_confM
+
+set.seed(1973)
+smile__svm_model_7A.2_pred <- predict(smile__svm_model_7A, tst_smile_girls)
+summary(smile__svm_model_7A.2_pred)
+smile__svm_model_7A.2_confM <- confusionMatrix(
+  smile__svm_model_7A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7A.2_confM
+
+# 7B AU's and apex
+
+set.seed(1973)
+smile__svm_model_7B <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  apex_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7B$results
+summary(smile__svm_model_7B$finalModel)
+
+smile__svm_model_7B_pred <- predict(smile__svm_model_7B, tst_smile)
+summary(smile__svm_model_7B_pred)
+smile__svm_model_7B_confM <- confusionMatrix(
+  smile__svm_model_7B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7B.1_pred <- predict(smile__svm_model_7B, tst_smile_boys)
+summary(smile__svm_model_7B.1_pred)
+smile__svm_model_7B.1_confM <- confusionMatrix(
+  smile__svm_model_7B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7B.1_confM
+
+set.seed(1973)
+smile__svm_model_7B.2_pred <- predict(smile__svm_model_7B, tst_smile_girls)
+summary(smile__svm_model_7B.2_pred)
+smile__svm_model_7B.2_confM <- confusionMatrix(
+  smile__svm_model_7B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7B.2_confM
+
+# 7C AU's and offset
+
+set.seed(1973)
+smile__svm_model_7C <- train(smile_type ~ AU01_r_mean + AU02_r_mean +
+  AU04_r_mean + AU05_r_mean + AU06_r_mean +
+  AU07_r_mean + AU09_r_mean + AU10_r_mean +
+  AU12_r_mean + AU14_r_mean + AU15_r_mean +
+  AU17_r_mean + AU20_r_mean + AU23_r_mean +
+  AU25_r_mean + AU26_r_mean + AU45_r_mean +
+  offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7C$results
+summary(smile__svm_model_7C$finalModel)
+# visualize the svm using the rattle package
+# plot(smile__svm_model_7C$finalModel)
+
+smile__svm_model_7C_pred <- predict(smile__svm_model_7C, tst_smile)
+summary(smile__svm_model_7C_pred)
+smile__svm_model_7C_confM <- confusionMatrix(
+  smile__svm_model_7C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7C.1_pred <- predict(smile__svm_model_7C, tst_smile_boys)
+summary(smile__svm_model_7C.1_pred)
+smile__svm_model_7C.1_confM <- confusionMatrix(
+  smile__svm_model_7C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7C.1_confM
+
+set.seed(1973)
+smile__svm_model_7C.2_pred <- predict(smile__svm_model_7C, tst_smile_girls)
+summary(smile__svm_model_7C.2_pred)
+smile__svm_model_7C.2_confM <- confusionMatrix(
+  smile__svm_model_7C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7C.2_confM
+
+# 7D AU's selection and dynamics
+set.seed(1973)
+smile__svm_model_7D <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7D$results
+summary(smile__svm_model_7D$finalModel)
+
+smile__svm_model_7D_pred <- predict(smile__svm_model_7D, tst_smile)
+summary(smile__svm_model_7D_pred)
+smile__svm_model_7D_confM <- confusionMatrix(
+  smile__svm_model_7D_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7D.1_pred <- predict(smile__svm_model_7D, tst_smile_boys)
+summary(smile__svm_model_7D.1_pred)
+smile__svm_model_7D.1_confM <- confusionMatrix(
+  smile__svm_model_7D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7D.1_confM
+
+set.seed(1973)
+smile__svm_model_7D.2_pred <- predict(smile__svm_model_7D, tst_smile_girls)
+summary(smile__svm_model_7D.2_pred)
+smile__svm_model_7D.2_confM <- confusionMatrix(
+  smile__svm_model_7D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7D.2_confM
+
+# 7E AU's selection and onset
+
+set.seed(1973)
+smile__svm_model_7E <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7E$results
+summary(smile__svm_model_7E$finalModel)
+
+smile__svm_model_7E_pred <- predict(smile__svm_model_7E, tst_smile)
+summary(smile__svm_model_7E_pred)
+smile__svm_model_7E_confM <- confusionMatrix(
+  smile__svm_model_7E_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7E.1_pred <- predict(smile__svm_model_7E, tst_smile_boys)
+summary(smile__svm_model_7E.1_pred)
+smile__svm_model_7E.1_confM <- confusionMatrix(
+  smile__svm_model_7E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7E.1_confM
+
+set.seed(1973)
+smile__svm_model_7E.2_pred <- predict(smile__svm_model_7E, tst_smile_girls)
+summary(smile__svm_model_7E.2_pred)
+smile__svm_model_7E.2_confM <- confusionMatrix(
+  smile__svm_model_7E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7E.2_confM
+
+# 7B apex AU's selection and apex
+
+set.seed(1973)
+smile__svm_model_7F <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7F$results
+summary(smile__svm_model_7F$finalModel)
+
+smile__svm_model_7F_pred <- predict(smile__svm_model_7F, tst_smile)
+summary(smile__svm_model_7F_pred)
+smile__svm_model_7F_confM <- confusionMatrix(
+  smile__svm_model_7F_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7F.1_pred <- predict(smile__svm_model_7F, tst_smile_boys)
+summary(smile__svm_model_7F.1_pred)
+smile__svm_model_7F.1_confM <- confusionMatrix(
+  smile__svm_model_7F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7F.1_confM
+
+set.seed(1973)
+smile__svm_model_7F.2_pred <- predict(smile__svm_model_7F, tst_smile_girls)
+summary(smile__svm_model_7F.2_pred)
+smile__svm_model_7F.2_confM <- confusionMatrix(
+  smile__svm_model_7F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7F.2_confM
+
+# 7G AU's selection and offset
+
+set.seed(1973)
+smile__svm_model_7G <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7G$results
+summary(smile__svm_model_7G$finalModel)
+
+smile__svm_model_7G_pred <- predict(smile__svm_model_7G, tst_smile)
+summary(smile__svm_model_7G_pred)
+smile__svm_model_7G_confM <- confusionMatrix(
+  smile__svm_model_7G_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7G.1_pred <- predict(smile__svm_model_7G, tst_smile_boys)
+summary(smile__svm_model_7G.1_pred)
+smile__svm_model_7G.1_confM <- confusionMatrix(
+  smile__svm_model_7G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7G.1_confM
+
+set.seed(1973)
+smile__svm_model_7G.2_pred <- predict(smile__svm_model_7G, tst_smile_girls)
+summary(smile__svm_model_7G.2_pred)
+smile__svm_model_7G.2_confM <- confusionMatrix(
+  smile__svm_model_7G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7G.2_confM
+
+# 7H selection AU's + temporal features
+set.seed(1973)
+smile__svm_model_7H <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7H$results
+summary(smile__svm_model_7H$finalModel)
+
+smile__svm_model_7H_pred <- predict(smile__svm_model_7H, tst_smile)
+summary(smile__svm_model_7H_pred)
+smile__svm_model_7H_confM <- confusionMatrix(
+  smile__svm_model_7H_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7H.1_pred <- predict(smile__svm_model_7H, tst_smile_boys)
+summary(smile__svm_model_7H.1_pred)
+smile__svm_model_7H.1_confM <- confusionMatrix(
+  smile__svm_model_7H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7H.1_confM
+
+set.seed(1973)
+smile__svm_model_7H.2_pred <- predict(smile__svm_model_7H, tst_smile_girls)
+summary(smile__svm_model_7H.2_pred)
+smile__svm_model_7H.2_confM <- confusionMatrix(
+  smile__svm_model_7H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7H.2_confM
+
+# 7I
+
+set.seed(1973)
+smile__svm_model_7I <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7I$results
+summary(smile__svm_model_7I$finalModel)
+
+smile__svm_model_7I_pred <- predict(smile__svm_model_7I, tst_smile)
+summary(smile__svm_model_7I_pred)
+smile__svm_model_7I_confM <- confusionMatrix(
+  smile__svm_model_7I_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7I.1_pred <- predict(smile__svm_model_7I, tst_smile_boys)
+summary(smile__svm_model_7I.1_pred)
+smile__svm_model_7I.1_confM <- confusionMatrix(
+  smile__svm_model_7I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7I.1_confM
+
+set.seed(1973)
+smile__svm_model_7I.2_pred <- predict(smile__svm_model_7I, tst_smile_girls)
+summary(smile__svm_model_7I.2_pred)
+smile__svm_model_7I.2_confM <- confusionMatrix(
+  smile__svm_model_7I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7I.2_confM
+
+# 7J
+
+set.seed(1973)
+smile__svm_model_7J <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  apex_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7J$results
+summary(smile__svm_model_7J$finalModel)
+
+smile__svm_model_7J_pred <- predict(smile__svm_model_7J, tst_smile)
+summary(smile__svm_model_7J_pred)
+smile__svm_model_7J_confM <- confusionMatrix(
+  smile__svm_model_7J_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7J.1_pred <- predict(smile__svm_model_7J, tst_smile_boys)
+summary(smile__svm_model_7J.1_pred)
+smile__svm_model_7J.1_confM <- confusionMatrix(
+  smile__svm_model_7J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7J.1_confM
+
+set.seed(1973)
+smile__svm_model_7J.2_pred <- predict(smile__svm_model_7J, tst_smile_girls)
+summary(smile__svm_model_7J.2_pred)
+smile__svm_model_7J.2_confM <- confusionMatrix(
+  smile__svm_model_7J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7J.2_confM
+
+# 7K
+
+set.seed(1973)
+smile__svm_model_7K <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  offset_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_7K$results
+summary(smile__svm_model_7K$finalModel)
+
+smile__svm_model_7K_pred <- predict(smile__svm_model_7K, tst_smile)
+summary(smile__svm_model_7K_pred)
+smile__svm_model_7K_confM <- confusionMatrix(
+  smile__svm_model_7K_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_7K_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_7K.1_pred <- predict(smile__svm_model_7K, tst_smile_boys)
+summary(smile__svm_model_7K.1_pred)
+smile__svm_model_7K.1_confM <- confusionMatrix(
+  smile__svm_model_7K.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_7K.1_confM
+
+set.seed(1973)
+smile__svm_model_7K.2_pred <- predict(smile__svm_model_7K, tst_smile_girls)
+summary(smile__svm_model_7K.2_pred)
+smile__svm_model_7K.2_confM <- confusionMatrix(
+  smile__svm_model_7K.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_7K.2_confM
+```
+
+```{r message=FALSE, warning=FALSE}
+# 8 strongest features
+
+# 8A
+set.seed(1973)
+smile__svm_model_8A <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + lip_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8A$results
+
+smile__svm_model_8A_pred <- predict(smile__svm_model_8A, tst_smile)
+summary(smile__svm_model_8A_pred)
+smile__svm_model_8A_confM <- confusionMatrix(
+  smile__svm_model_8A_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8A_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8A.1_pred <- predict(smile__svm_model_8A, tst_smile_boys)
+summary(smile__svm_model_8A.1_pred)
+smile__svm_model_8A.1_confM <- confusionMatrix(
+  smile__svm_model_8A.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8A.1_confM
+
+set.seed(1973)
+smile__svm_model_8A.2_pred <- predict(smile__svm_model_8A, tst_smile_girls)
+summary(smile__svm_model_8A.2_pred)
+smile__svm_model_8A.2_confM <- confusionMatrix(
+  smile__svm_model_8A.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8A.2_confM
+
+# 8B
+set.seed(1973)
+smile__svm_model_8B <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + lip_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8B$results
+
+
+smile__svm_model_8B_pred <- predict(smile__svm_model_8B, tst_smile)
+summary(smile__svm_model_8B_pred)
+smile__svm_model_8B_confM <- confusionMatrix(
+  smile__svm_model_8B_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8B_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8B.1_pred <- predict(smile__svm_model_8B, tst_smile_boys)
+summary(smile__svm_model_8B.1_pred)
+smile__svm_model_8B.1_confM <- confusionMatrix(
+  smile__svm_model_8B.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8B.1_confM
+
+set.seed(1973)
+smile__svm_model_8B.2_pred <- predict(smile__svm_model_8B, tst_smile_girls)
+summary(smile__svm_model_8B.2_pred)
+smile__svm_model_8B.2_confM <- confusionMatrix(
+  smile__svm_model_8B.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8B.2_confM
+
+# 8C
+set.seed(1973)
+smile__svm_model_8C <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean + lip_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8C$results
+
+
+smile__svm_model_8C_pred <- predict(smile__svm_model_8C, tst_smile)
+summary(smile__svm_model_8C_pred)
+smile__svm_model_8C_confM <- confusionMatrix(
+  smile__svm_model_8C_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8C_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8C.1_pred <- predict(smile__svm_model_8C, tst_smile_boys)
+summary(smile__svm_model_8C.1_pred)
+smile__svm_model_8C.1_confM <- confusionMatrix(
+  smile__svm_model_8C.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8C.1_confM
+
+set.seed(1973)
+smile__svm_model_8C.2_pred <- predict(smile__svm_model_8C, tst_smile_girls)
+summary(smile__svm_model_8C.2_pred)
+smile__svm_model_8C.2_confM <- confusionMatrix(
+  smile__svm_model_8C.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8C.2_confM
+
+# 8D
+set.seed(1973)
+smile__svm_model_8D <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean + lip_mean +
+  eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8D$results
+
+
+smile__svm_model_8D_pred <- predict(smile__svm_model_8D, tst_smile)
+summary(smile__svm_model_8D_pred)
+smile__svm_model_8D_confM <- confusionMatrix(
+  smile__svm_model_8D_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8D_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8D.1_pred <- predict(smile__svm_model_8D, tst_smile_boys)
+summary(smile__svm_model_8D.1_pred)
+smile__svm_model_8D.1_confM <- confusionMatrix(
+  smile__svm_model_8D.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8D.1_confM
+
+set.seed(1973)
+smile__svm_model_8D.2_pred <- predict(smile__svm_model_8D, tst_smile_girls)
+summary(smile__svm_model_8D.2_pred)
+smile__svm_model_8D.2_confM <- confusionMatrix(
+  smile__svm_model_8D.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8D.2_confM
+
+# 8E
+set.seed(1973)
+smile__svm_model_8E <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean + lip_mean +
+  eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8E$results
+
+smile__svm_model_8E_pred <- predict(smile__svm_model_8E, tst_smile)
+summary(smile__svm_model_8E_pred)
+smile__svm_model_8E_confM <- confusionMatrix(
+  smile__svm_model_8E_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8E_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8E.1_pred <- predict(smile__svm_model_8E, tst_smile_boys)
+summary(smile__svm_model_8E.1_pred)
+smile__svm_model_8E.1_confM <- confusionMatrix(
+  smile__svm_model_8E.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8E.1_confM
+
+set.seed(1973)
+smile__svm_model_8E.2_pred <- predict(smile__svm_model_8E, tst_smile_girls)
+summary(smile__svm_model_8E.2_pred)
+smile__svm_model_8E.2_confM <- confusionMatrix(
+  smile__svm_model_8E.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8E.2_confM
+
+# 8F
+set.seed(1973)
+smile__svm_model_8F <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8F$results
+
+
+smile__svm_model_8F_pred <- predict(smile__svm_model_8F, tst_smile)
+summary(smile__svm_model_8F_pred)
+smile__svm_model_8F_confM <- confusionMatrix(
+  smile__svm_model_8F_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8F_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8F.1_pred <- predict(smile__svm_model_8F, tst_smile_boys)
+summary(smile__svm_model_8F.1_pred)
+smile__svm_model_8F.1_confM <- confusionMatrix(
+  smile__svm_model_8F.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8F.1_confM
+
+set.seed(1973)
+smile__svm_model_8F.2_pred <- predict(smile__svm_model_8F, tst_smile_girls)
+summary(smile__svm_model_8F.2_pred)
+smile__svm_model_8F.2_confM <- confusionMatrix(
+  smile__svm_model_8F.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8F.2_confM
+
+# 8G
+set.seed(1973)
+smile__svm_model_8G <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8G$results
+
+
+smile__svm_model_8G_pred <- predict(smile__svm_model_8G, tst_smile)
+summary(smile__svm_model_8G_pred)
+smile__svm_model_8G_confM <- confusionMatrix(
+  smile__svm_model_8G_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8G_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8G.1_pred <- predict(smile__svm_model_8G, tst_smile_boys)
+summary(smile__svm_model_8G.1_pred)
+smile__svm_model_8G.1_confM <- confusionMatrix(
+  smile__svm_model_8G.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8G.1_confM
+
+set.seed(1973)
+smile__svm_model_8G.2_pred <- predict(smile__svm_model_8G, tst_smile_girls)
+summary(smile__svm_model_8G.2_pred)
+smile__svm_model_8G.2_confM <- confusionMatrix(
+  smile__svm_model_8G.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8G.2_confM
+
+# 8H
+set.seed(1973)
+smile__svm_model_8H <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + apex_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8H$results
+
+
+smile__svm_model_8H_pred <- predict(smile__svm_model_8H, tst_smile)
+summary(smile__svm_model_8H_pred)
+smile__svm_model_8H_confM <- confusionMatrix(
+  smile__svm_model_8H_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8H_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8H.1_pred <- predict(smile__svm_model_8H, tst_smile_boys)
+summary(smile__svm_model_8H.1_pred)
+smile__svm_model_8H.1_confM <- confusionMatrix(
+  smile__svm_model_8H.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8H.1_confM
+
+set.seed(1973)
+smile__svm_model_8H.2_pred <- predict(smile__svm_model_8H, tst_smile_girls)
+summary(smile__svm_model_8H.2_pred)
+smile__svm_model_8H.2_confM <- confusionMatrix(
+  smile__svm_model_8H.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8H.2_confM
+
+# 8I
+set.seed(1973)
+smile__svm_model_8I <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + offset_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8I$results
+
+
+smile__svm_model_8I_pred <- predict(smile__svm_model_8I, tst_smile)
+summary(smile__svm_model_8I_pred)
+smile__svm_model_8I_confM <- confusionMatrix(
+  smile__svm_model_8I_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8I_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8I.1_pred <- predict(smile__svm_model_8I, tst_smile_boys)
+summary(smile__svm_model_8I.1_pred)
+smile__svm_model_8I.1_confM <- confusionMatrix(
+  smile__svm_model_8I.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8I.1_confM
+
+set.seed(1973)
+smile__svm_model_8I.2_pred <- predict(smile__svm_model_8I, tst_smile_girls)
+summary(smile__svm_model_8I.2_pred)
+smile__svm_model_8I.2_confM <- confusionMatrix(
+  smile__svm_model_8I.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8I.2_confM
+
+# 8J
+set.seed(1973)
+smile__svm_model_8J <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean + onset_mean + apex_mean +
+  offset_mean + lip_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8J$results
+
+smile__svm_model_8J_pred <- predict(smile__svm_model_8J, tst_smile)
+summary(smile__svm_model_8J_pred)
+smile__svm_model_8J_confM <- confusionMatrix(
+  smile__svm_model_8J_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8J_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8J.1_pred <- predict(smile__svm_model_8J, tst_smile_boys)
+summary(smile__svm_model_8J.1_pred)
+smile__svm_model_8J.1_confM <- confusionMatrix(
+  smile__svm_model_8J.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8J.1_confM
+
+set.seed(1973)
+smile__svm_model_8J.2_pred <- predict(smile__svm_model_8J, tst_smile_girls)
+summary(smile__svm_model_8J.2_pred)
+smile__svm_model_8J.2_confM <- confusionMatrix(
+  smile__svm_model_8J.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8J.2_confM
+
+# 8K
+set.seed(1973)
+smile__svm_model_8K <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean + lip_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8K$results
+
+
+smile__svm_model_8K_pred <- predict(smile__svm_model_8K, tst_smile)
+summary(smile__svm_model_8K_pred)
+smile__svm_model_8K_confM <- confusionMatrix(
+  smile__svm_model_8K_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8K_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8K.1_pred <- predict(smile__svm_model_8K, tst_smile_boys)
+summary(smile__svm_model_8K.1_pred)
+smile__svm_model_8K.1_confM <- confusionMatrix(
+  smile__svm_model_8K.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8K.1_confM
+
+set.seed(1973)
+smile__svm_model_8K.2_pred <- predict(smile__svm_model_8K, tst_smile_girls)
+summary(smile__svm_model_8K.2_pred)
+smile__svm_model_8K.2_confM <- confusionMatrix(
+  smile__svm_model_8K.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8K.2_confM
+
+# 8L
+set.seed(1973)
+smile__svm_model_8L <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  onset_mean + apex_mean + offset_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_8L$results
+
+smile__svm_model_8L_pred <- predict(smile__svm_model_8L, tst_smile)
+summary(smile__svm_model_8L_pred)
+smile__svm_model_8L_confM <- confusionMatrix(
+  smile__svm_model_8L_pred,
+  tst_smile$smile_type
+)
+smile__svm_model_8L_confM
+
+# predicting boys, girls
+set.seed(1973)
+smile__svm_model_8L.1_pred <- predict(smile__svm_model_8L, tst_smile_boys)
+summary(smile__svm_model_8L.1_pred)
+smile__svm_model_8L.1_confM <- confusionMatrix(
+  smile__svm_model_8L.1_pred,
+  tst_smile_boys$smile_type
+)
+smile__svm_model_8L.1_confM
+
+set.seed(1973)
+smile__svm_model_8L.2_pred <- predict(smile__svm_model_8L, tst_smile_girls)
+summary(smile__svm_model_8L.2_pred)
+smile__svm_model_8L.2_confM <- confusionMatrix(
+  smile__svm_model_8L.2_pred,
+  tst_smile_girls$smile_type
+)
+smile__svm_model_8L.2_confM
+```
+
+```{r}
+# test two models without temporal features
+# they do not improve the accuracy scores
+set.seed(1973)
+smile__svm_model_9 <- train(smile_type ~ AU01_r_mean + AU09_r_mean +
+  AU10_r_mean + AU25_r_mean + AU45_r_mean +
+  lip_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_9$results
+
+set.seed(1973)
+smile__svm_model_10 <- train(smile_type ~ AU06_r_mean + AU12_r_mean +
+  AU45_r_mean +
+  lip_mean + eye_mean,
+method = "svmLinear", data = trn_smile,
+trControl = trainControl(method = "cv", number = 10)
+)
+
+smile__svm_model_10$results
+```
+
+
+## Part 4: packages and other information
+
+### Installing other liberaries and packages
+
+In the exploration phase of the thesis the OpenFacer package was tested. This package published on GitHub, needed installation via the devtools package. The installation code is shown below. 
+
+```{r message=FALSE, warning=FALSE}
+# install_github("davidecannatanuig/openFaceR")
+library(openfacer)
+# citation("openfacer")
+# library(devtools)
+# citation("devtools")
+```
+
+### Using Openfacer
+
+Openfacer is a tool developed for social sientists. This tool is used to set up feature creation of this study and as it resources were to limited, the results on the descriptive statistics were compared. They show the same outcome, and the choice was made to move on with database which was build by myself, because of more flexibility in the analysis. 
+
+```{r message=FALSE, warning=FALSE}
+# loading packages
+library(openfacer)
+library(readr)
+library(tidyverse)
+
+# read the CSV files at once into RStudio
+UvA_face <- read_face_csvs("Data_Openface/CSV/")
+
+# create features using a pipeline
+UvA_final_face <- UvA_face %>%
+  select_faces(
+    starts_with("gaze_"), starts_with("pose_"), starts_with("AU06"),
+    starts_with("AU12"), x_36, x_37, x_38, x_39, x_42, x_43, x_44, x_45,
+    x_48, x_54, y_36, y_37, y_38, y_39, y_42, y_43, y_44, y_45, y_48,
+    y_54
+  ) %>%
+  mutate_faces(AU06_12_c = ifelse(AU06_c == 1 & AU12_c == 1, 1, 0)) %>%
+  mutate_faces(lip = sqrt((x_48 - x_54)^2 + (y_48 - y_54)^2)) %>%
+  mutate_faces(eye_x_m_l = (x_36 + x_39) / 2) %>%
+  mutate_faces(eye_y_m_l = (y_36 + y_39) / 2) %>%
+  mutate_faces(eye_x_m_r = (x_42 + x_45) / 2) %>%
+  mutate_faces(eye_y_m_r = (y_42 + y_45) / 2) %>%
+  mutate_faces(eye_x_u_l = (x_37 + x_38) / 2) %>%
+  mutate_faces(eye_y_u_l = (y_37 + y_38) / 2) %>%
+  mutate_faces(eye_x_u_r = (x_43 + x_44) / 2) %>%
+  mutate_faces(eye_y_u_r = (y_43 + y_44) / 2) %>%
+  mutate_faces(eye_l = sqrt((eye_x_m_l - eye_x_u_l)^2 +
+    (eye_y_m_l - eye_y_u_l)^2)) %>%
+  mutate_faces(eye_r = sqrt((eye_x_m_r - eye_x_u_r)^2 +
+    (eye_y_m_r - eye_y_u_r)^2)) %>%
+  mutate_faces(eye = (eye_l + eye_r) / 2) %>%
+  select_faces(
+    starts_with("gaze_"), starts_with("pose_"), starts_with("AU06"),
+    starts_with("AU12"), lip, eye_l, eye_r, eye
+  ) %>%
+  tidy_face()
+
+# save the data frame
+write_csv(UvA_final_face, "UvA_final_face")
+
+# create a check file to the own created summary file.
+# compare two files have the same content using all()
+UvA_face_check <- read.csv("UvA_final_face")
+# all()
+```
+
+### Creation of a face figure as illustration
+
+To support the thesis a figure is created displaying all the 2D landmark features. This is done based on subject number 20, as this subject is the only in database which data can be used in the report with permission of the data holder. The picture can be found in the thesis file. 
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+# citation("reshape2")
+
+figure_1 <- read.csv("masterfile_connected")
+
+figure_2 <- figure_1 %>%
+  select(starts_with("x_"))
+
+figure_2 <- figure_2[50, ]
+
+fig_3 <- dcast(melt(as.matrix(figure_2)),
+  Var2 ~ paste0("x", Var1),
+  value.var = "value"
+)
+
+figure_4 <- figure_1 %>%
+  select(starts_with("y_"))
+
+figure_4 <- figure_4[50, ]
+
+fig_5 <- dcast(melt(as.matrix(figure_4)),
+  Var2 ~ paste0("y", Var1),
+  value.var = "value"
+)
+
+fig_6 <- cbind(fig_5, fig_3)
+fig_6 <- fig_6[1:68, ]
+fig_6$Var2 <- gsub("y_", "", fig_6$Var2)
+
+par(mfrow = c(1, 1))
+dev.new(width = 5, height = 8)
+plot(fig_6$x50, fig_6$y50,
+  xlim = c(950, 400), ylim = c(850, 300),
+  col = "blue",
+  xlab = "landmark x points", ylab = "landmark y points"
+)
+text(fig_6$x50, fig_6$y50, labels = fig_6$Var2, cex = .6, pos = 4)
+
+```
