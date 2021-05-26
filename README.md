@@ -1,2 +1,2 @@
 # Masterthesis-Datasience-in-action
-A R Markdown file containing the code of thesis project.
+An R Markdown file containing the code of my thesis project.
